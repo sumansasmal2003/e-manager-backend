@@ -124,7 +124,13 @@ exports.scheduleMeeting = async (req, res) => {
     });
 
     const createdMeeting = await meeting.save();
-    res.status(201).json(createdMeeting);
+    logActivity(
+  createdMeeting.team,
+  req.user.id,
+  'MEETING_SCHEDULED',
+  `Scheduled meeting '${createdMeeting.title}' for ${new Date(createdMeeting.meetingTime).toLocaleDateString()}`
+);
+res.status(201).json(createdMeeting);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
   }

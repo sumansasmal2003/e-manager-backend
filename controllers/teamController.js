@@ -2,6 +2,9 @@ const Team = require('../models/Team');
 const User = require('../models/User');
 const Task = require('../models/Task');       // <-- Import Task
 const Meeting = require('../models/Meeting');
+const TeamNote = require('../models/TeamNote');
+const Activity = require('../models/Activity');
+const { logActivity } = require('../services/activityService');
 
 // @desc    Create a new team
 // @route   POST /api/teams
@@ -26,7 +29,13 @@ exports.createTeam = async (req, res) => {
     const populatedTeam = await Team.findById(createdTeam._id)
       .populate('owner', 'username email');
 
-    res.status(201).json(populatedTeam);
+    logActivity(
+  populatedTeam._id,
+  req.user.id,
+  'TEAM_CREATED',
+  `Team '${populatedTeam.teamName}' was created`
+);
+res.status(201).json(populatedTeam);
 
   } catch (error) {
     // This catch block is what sends the 500 error
@@ -78,6 +87,13 @@ exports.addTeamMember = async (req, res) => {
     // Add the name (string) to the array
     team.members.push(name);
     await team.save();
+
+    logActivity(
+  team._id,
+  req.user.id,
+  'MEMBER_ADDED',
+  `Added member '${name}' to the team`
+);
 
     // Send back the updated team
     const populatedTeam = await Team.findById(team._id)
@@ -132,7 +148,10 @@ exports.deleteTeam = async (req, res) => {
     await Task.deleteMany({ team: team._id });
     // 2. Delete all meetings for this team
     await Meeting.deleteMany({ team: team._id });
-    // 3. Delete the team itself
+    // 3. Delete all team notes for this team
+    await TeamNote.deleteMany({ team: team._id });
+    await Activity.deleteMany({ team: team._id });
+    // 4. Delete the team itself
     await team.deleteOne();
 
     res.json({ message: 'Team disbanded successfully' });
@@ -165,6 +184,13 @@ exports.addFigmaLink = async (req, res) => {
     // Add the new file link
     team.figmaFiles.push({ name, link });
     await team.save();
+
+    logActivity(
+  team._id,
+  req.user.id,
+  'FIGMA_LINK_ADDED',
+  `Added Figma link: '${name}'`
+);
 
     // Send back the updated team
     const populatedTeam = await Team.findById(team._id)
@@ -203,6 +229,13 @@ exports.deleteFigmaLink = async (req, res) => {
     fileLink.deleteOne();
     await team.save();
 
+    logActivity(
+  team._id,
+  req.user.id,
+  'FIGMA_LINK_DELETED',
+  `Removed Figma link: '${name}'`
+);
+
     // Send back the updated team
     const populatedTeam = await Team.findById(team._id)
       .populate('owner', 'username email');
@@ -235,6 +268,13 @@ exports.addGithubRepo = async (req, res) => {
     team.githubRepos.push({ name, link });
     await team.save();
 
+    logActivity(
+  team._id,
+  req.user.id,
+  'GITHUB_REPO_ADDED',
+  `Added GitHub Repo: '${name}'`
+);
+
     const populatedTeam = await Team.findById(team._id)
       .populate('owner', 'username email');
 
@@ -266,6 +306,13 @@ exports.deleteGithubRepo = async (req, res) => {
 
     repoLink.deleteOne();
     await team.save();
+
+    logActivity(
+  team._id,
+  req.user.id,
+  'GITHUB_REPO_DELETED',
+  `Removed GitHub Repo: '${name}'`
+);
 
     const populatedTeam = await Team.findById(team._id)
       .populate('owner', 'username email');
@@ -317,6 +364,13 @@ exports.removeTeamMember = async (req, res) => {
 
     // Run operations in parallel
     await Promise.all([taskDeletion, meetingUpdate]);
+
+    logActivity(
+  team._id,
+  req.user.id,
+  'MEMBER_REMOVED',
+  `Removed member '${name}' from the team`
+);
 
     // --- End Cascade Operations ---
 

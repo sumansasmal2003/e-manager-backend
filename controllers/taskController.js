@@ -1,15 +1,30 @@
 const Task = require('../models/Task');
 const Team = require('../models/Team');
+const TeamNote = require('../models/TeamNote');
+const { logActivity } = require('../services/activityService');
 
 // We re-use this check from teamController, but we need to fetch the team
 const checkTeamMembership = async (req, res, next) => {
   try {
-    // Find team by EITHER teamId or taskId
     let teamId = req.params.teamId;
+
     if (!teamId) {
-      const task = await Task.findById(req.params.taskId);
-      if (!task) return res.status(404).json({ message: 'Task not found' });
-      teamId = task.team;
+      // Check if it's a task route
+      if (req.params.taskId) {
+        const task = await Task.findById(req.params.taskId);
+        if (!task) return res.status(404).json({ message: 'Task not found' });
+        teamId = task.team;
+      }
+      // Check if it's a teamnote route
+      else if (req.params.noteId) {
+        const note = await TeamNote.findById(req.params.noteId);
+        if (!note) return res.status(404).json({ message: 'Team note not found' });
+        teamId = note.team;
+      }
+    }
+
+    if (!teamId) {
+      return res.status(400).json({ message: 'No team or resource ID provided' });
     }
 
     const team = await Team.findById(teamId);
@@ -68,7 +83,13 @@ exports.updateTask = async (req, res) => {
     task.dueDate = dueDate || task.dueDate;
 
     const updatedTask = await task.save();
-    res.json(updatedTask);
+    logActivity(
+  updatedTask.team,
+  req.user.id,
+  'TASK_UPDATED',
+  `Updated task '${updatedTask.title}' (Status: ${updatedTask.status})`
+);
+res.json(updatedTask);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
   }
@@ -108,7 +129,15 @@ exports.createBulkTasks = async (req, res) => {
     });
 
     const createdTasks = await Task.insertMany(tasksToCreate);
-    res.status(201).json(createdTasks);
+    for (const task of createdTasks) {
+  logActivity(
+    task.team,
+    req.user.id,
+    'TASK_CREATED',
+    `Created task '${task.title}' for ${task.assignedTo}`
+  );
+}
+res.status(201).json(createdTasks);
 
   } catch (error) {
     // --- BETTER ERROR HANDLING ---
@@ -137,7 +166,13 @@ exports.deleteTask = async (req, res) => {
 
     // Authorization is handled by the checkTeamMembership middleware
     // We can just delete the task
-    await task.deleteOne();
+    logActivity(
+  task.team,
+  req.user.id,
+  'TASK_DELETED',
+  `Deleted task '${task.title}'`
+);
+await task.deleteOne();
     res.json({ message: 'Task removed successfully' });
 
   } catch (error) {
