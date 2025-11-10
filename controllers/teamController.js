@@ -276,3 +276,61 @@ exports.deleteGithubRepo = async (req, res) => {
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
+
+// @desc    Remove a member (string name) from a team
+// @route   PUT /api/teams/:id/remove
+exports.removeTeamMember = async (req, res) => {
+  try {
+    const { name } = req.body; // Get the name of the member to remove
+    if (!name) {
+      return res.status(400).json({ message: 'Please provide a member name' });
+    }
+
+    const team = await Team.findById(req.params.id);
+
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+
+    // Check if the logged-in user is the owner
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized, only owner can remove members' });
+    }
+
+    // Check if the member exists in the team
+    const memberIndex = team.members.indexOf(name);
+    if (memberIndex === -1) {
+      return res.status(404).json({ message: 'Member not found in this team' });
+    }
+
+    // --- Start Cascade Operations ---
+    // We must clean up tasks and meetings before removing the member
+
+    // 1. Delete all tasks assigned to this member in this team
+    const taskDeletion = Task.deleteMany({ team: team._id, assignedTo: name });
+
+    // 2. Remove this member from all meeting participant lists for this team
+    const meetingUpdate = Meeting.updateMany(
+      { team: team._id },
+      { $pull: { participants: name } }
+    );
+
+    // Run operations in parallel
+    await Promise.all([taskDeletion, meetingUpdate]);
+
+    // --- End Cascade Operations ---
+
+    // Now, remove the member from the team's array
+    team.members.pull(name); // .pull() is a Mongoose helper for removing from array
+    await team.save();
+
+    // Send back the updated team
+    const populatedTeam = await Team.findById(team._id)
+      .populate('owner', 'username email');
+
+    res.json(populatedTeam);
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};

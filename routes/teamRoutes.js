@@ -9,7 +9,8 @@ const {
   addFigmaLink,     // <-- ADD THIS
   deleteFigmaLink,
   addGithubRepo,     // <-- ADD THIS
-  deleteGithubRepo
+  deleteGithubRepo,
+  removeTeamMember
 } = require('../controllers/teamController');
 
 const { protect } = require('../middleware/authMiddleware');
@@ -30,6 +31,9 @@ router.route('/')
 
 router.route('/:id/add')
   .put(addTeamMember); // PUT /api/teams/some-team-id/add
+
+  router.route('/:id/remove')
+  .put(removeTeamMember);
 
 router.route('/:id/figma')
   .post(addFigmaLink); // POST /api/teams/some-team-id/figma
