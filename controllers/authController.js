@@ -34,6 +34,7 @@ exports.registerUser = async (req, res) => {
         username: user.username,
         email: user.email,
         token: generateToken(user._id),
+        connecteamAccounts: user.connecteamAccounts || [],
       });
 
       // We will add the nodemailer welcome email here later!
@@ -68,6 +69,7 @@ exports.loginUser = async (req, res) => {
         username: user.username,
         email: user.email,
         token: generateToken(user._id),
+        connecteamAccounts: user.connecteamAccounts || [],
       });
     } else {
       res.status(401).json({ message: 'Invalid email or password' });

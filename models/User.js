@@ -1,6 +1,19 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const connecteamAccountSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Please provide a name for the account'],
+    trim: true,
+  },
+  link: {
+    type: String,
+    required: [true, 'Please provide the link'],
+    trim: true,
+  },
+});
+
 const userSchema = new mongoose.Schema({
   username: {
     type: String,
@@ -23,6 +36,7 @@ const userSchema = new mongoose.Schema({
     minlength: 6,
     select: false, // Don't send password in responses by default
   },
+  connecteamAccounts: [connecteamAccountSchema],
 }, {
   timestamps: true, // Adds createdAt and updatedAt fields
 });

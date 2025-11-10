@@ -140,3 +140,139 @@ exports.deleteTeam = async (req, res) => {
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
+
+// @desc    Add a Figma file link to a team
+// @route   POST /api/teams/:id/figma
+exports.addFigmaLink = async (req, res) => {
+  try {
+    const { name, link } = req.body;
+
+    if (!name || !link) {
+      return res.status(400).json({ message: 'Please provide a name and a link' });
+    }
+
+    const team = await Team.findById(req.params.id);
+
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+
+    // Check if the logged-in user is the owner
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    // Add the new file link
+    team.figmaFiles.push({ name, link });
+    await team.save();
+
+    // Send back the updated team
+    const populatedTeam = await Team.findById(team._id)
+      .populate('owner', 'username email');
+
+    res.json(populatedTeam);
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+// @desc    Delete a Figma file link from a team
+// @route   DELETE /api/teams/:id/figma/:linkId
+exports.deleteFigmaLink = async (req, res) => {
+  try {
+    const { linkId } = req.params;
+    const team = await Team.findById(req.params.id);
+
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+
+    // Check if the logged-in user is the owner
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    // Find the link
+    const fileLink = team.figmaFiles.id(linkId);
+    if (!fileLink) {
+      return res.status(404).json({ message: 'File link not found' });
+    }
+
+    // Remove it from the array
+    fileLink.deleteOne();
+    await team.save();
+
+    // Send back the updated team
+    const populatedTeam = await Team.findById(team._id)
+      .populate('owner', 'username email');
+
+    res.json(populatedTeam);
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+// @desc    Add a GitHub repo link to a team
+// @route   POST /api/teams/:id/github
+exports.addGithubRepo = async (req, res) => {
+  try {
+    const { name, link } = req.body;
+
+    if (!name || !link) {
+      return res.status(400).json({ message: 'Please provide a name and a link' });
+    }
+
+    const team = await Team.findById(req.params.id);
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    team.githubRepos.push({ name, link });
+    await team.save();
+
+    const populatedTeam = await Team.findById(team._id)
+      .populate('owner', 'username email');
+
+    res.json(populatedTeam);
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+// @desc    Delete a GitHub repo link from a team
+// @route   DELETE /api/teams/:id/github/:repoId
+exports.deleteGithubRepo = async (req, res) => {
+  try {
+    const { repoId } = req.params;
+    const team = await Team.findById(req.params.id);
+
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    const repoLink = team.githubRepos.id(repoId);
+    if (!repoLink) {
+      return res.status(404).json({ message: 'Repo link not found' });
+    }
+
+    repoLink.deleteOne();
+    await team.save();
+
+    const populatedTeam = await Team.findById(team._id)
+      .populate('owner', 'username email');
+
+    res.json(populatedTeam);
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};

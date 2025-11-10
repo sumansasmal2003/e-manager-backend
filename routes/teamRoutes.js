@@ -5,7 +5,11 @@ const {
   getMyTeams,
   addTeamMember,
   getTeamById,
-  deleteTeam
+  deleteTeam,
+  addFigmaLink,     // <-- ADD THIS
+  deleteFigmaLink,
+  addGithubRepo,     // <-- ADD THIS
+  deleteGithubRepo
 } = require('../controllers/teamController');
 
 const { protect } = require('../middleware/authMiddleware');
@@ -26,5 +30,17 @@ router.route('/')
 
 router.route('/:id/add')
   .put(addTeamMember); // PUT /api/teams/some-team-id/add
+
+router.route('/:id/figma')
+  .post(addFigmaLink); // POST /api/teams/some-team-id/figma
+
+router.route('/:id/figma/:linkId')
+  .delete(deleteFigmaLink);
+
+router.route('/:id/github')
+  .post(addGithubRepo); // POST /api/teams/some-team-id/github
+
+router.route('/:id/github/:repoId')
+  .delete(deleteGithubRepo);
 
 module.exports = router;

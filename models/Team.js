@@ -1,5 +1,31 @@
 const mongoose = require('mongoose');
 
+const figmaFileSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Please provide a file name'],
+    trim: true,
+  },
+  link: {
+    type: String,
+    required: [true, 'Please provide a file link'],
+    trim: true,
+  },
+});
+
+const githubRepoSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Please provide a repo name'],
+    trim: true,
+  },
+  link: {
+    type: String,
+    required: [true, 'Please provide a repo link'],
+    trim: true,
+  },
+});
+
 const teamSchema = new mongoose.Schema(
   {
     teamName: {
@@ -18,6 +44,8 @@ const teamSchema = new mongoose.Schema(
         trim: true,
       },
     ],
+    figmaFiles: [figmaFileSchema],
+    githubRepos: [githubRepoSchema],
   },
   {
     timestamps: true,

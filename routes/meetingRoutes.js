@@ -4,12 +4,16 @@ const {
   scheduleMeeting,
   getMeetingsForTeam,
   checkTeamMembership, // Import the shared middleware
+  generateZoomMeeting,
 } = require('../controllers/meetingController');
 
 const { protect } = require('../middleware/authMiddleware');
 
 // Apply 'protect' middleware to all meeting routes
 router.use(protect);
+
+router.route('/generate-zoom')
+  .post(generateZoomMeeting);
 
 // Apply team membership check to all routes for /:teamId
 router.use('/:teamId', checkTeamMembership);
