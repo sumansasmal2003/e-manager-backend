@@ -86,3 +86,78 @@ exports.getOverviewStats = async (req, res) => {
     res.status(500).json({ message: 'Server Error' });
   }
 };
+
+// @desc    Get all action items for the leader's 'Today' page
+// @route   GET /api/stats/action-items
+exports.getActionItems = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 1. Get user's team IDs
+    const userTeams = await Team.find({ owner: userId }).select('_id');
+    const teamIds = userTeams.map(team => team._id);
+
+    // 2. Define date ranges
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // 3. Find Today's Meetings
+    const todayMeetingsQuery = Meeting.find({
+      team: { $in: teamIds },
+      meetingTime: { $gte: todayStart, $lte: todayEnd }
+    })
+    .sort({ meetingTime: 1 })
+    .populate('team', 'teamName');
+
+    // 4. Find Actionable Tasks
+    const overdueTasksQuery = Task.find({
+      team: { $in: teamIds },
+      dueDate: { $lt: todayStart },
+      status: { $ne: 'Completed' }
+    });
+
+    const dueTodayTasksQuery = Task.find({
+      team: { $in: teamIds },
+      dueDate: { $gte: todayStart, $lte: todayEnd },
+      status: { $ne: 'Completed' }
+    });
+
+    // 5. Find Weekly Personal Notes
+    const weeklyNotesQuery = Note.find({
+      user: userId,
+      planPeriod: 'This Week'
+    }).sort({ createdAt: -1 });
+
+    // 6. Run all queries in parallel
+    const [
+      todayMeetings,
+      overdueTasks,
+      dueTodayTasks,
+      weeklyNotes
+    ] = await Promise.all([
+      todayMeetingsQuery,
+      overdueTasksQuery,
+      dueTodayTasksQuery,
+      weeklyNotesQuery
+    ]);
+
+    // Combine tasks for easier frontend use
+    const actionTasks = {
+      overdue: overdueTasks,
+      dueToday: dueTodayTasks
+    };
+
+    res.json({
+      todayMeetings,
+      actionTasks,
+      weeklyNotes
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};

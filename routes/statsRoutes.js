@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { getOverviewStats } = require('../controllers/statsController');
+const { getOverviewStats, getActionItems } = require('../controllers/statsController');
 const { protect } = require('../middleware/authMiddleware');
 
 // All routes here are protected
 router.use(protect);
 
 router.route('/overview').get(getOverviewStats);
+
+router.route('/action-items').get(getActionItems);
 
 module.exports = router;

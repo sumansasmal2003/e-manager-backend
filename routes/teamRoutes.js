@@ -10,7 +10,8 @@ const {
   deleteFigmaLink,
   addGithubRepo,     // <-- ADD THIS
   deleteGithubRepo,
-  removeTeamMember
+  removeTeamMember,
+  generateTeamReport
 } = require('../controllers/teamController');
 
 const { protect } = require('../middleware/authMiddleware');
@@ -46,5 +47,8 @@ router.route('/:id/github')
 
 router.route('/:id/github/:repoId')
   .delete(deleteGithubRepo);
+
+  router.route('/:id/generate-report')
+  .post(generateTeamReport);
 
 module.exports = router;

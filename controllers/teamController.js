@@ -5,6 +5,7 @@ const Meeting = require('../models/Meeting');
 const TeamNote = require('../models/TeamNote');
 const Activity = require('../models/Activity');
 const { logActivity } = require('../services/activityService');
+const { generateAIReport } = require('../services/reportService');
 
 // @desc    Create a new team
 // @route   POST /api/teams
@@ -385,6 +386,72 @@ exports.removeTeamMember = async (req, res) => {
     res.json(populatedTeam);
 
   } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+// @desc    Generate a team report
+// @route   POST /api/teams/:id/generate-report
+exports.generateTeamReport = async (req, res) => {
+  const { startDate, endDate, leaderName } = req.body;
+  const { id: teamId } = req.params;
+
+  if (!startDate || !endDate || !leaderName) {
+    return res.status(400).json({ message: 'Missing required fields' });
+  }
+
+  try {
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+
+    // 1. Convert dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Ensure end date covers the whole day
+
+    // 2. Fetch all raw data in parallel
+    const tasksCreatedQuery = Task.find({
+      team: teamId,
+      createdAt: { $gte: start, $lte: end }
+    });
+
+    const tasksCompletedQuery = Task.find({
+      team: teamId,
+      status: 'Completed',
+      updatedAt: { $gte: start, $lte: end } // Use updatedAt to see when it was completed
+    });
+
+    const tasksOverdueQuery = Task.find({
+      team: teamId,
+      dueDate: { $lt: new Date() },
+      status: { $ne: 'Completed' },
+      createdAt: { $lte: end } // Only tasks that existed during this period
+    });
+
+    const meetingsHeldQuery = Meeting.find({
+      team: teamId,
+      meetingTime: { $gte: start, $lte: end }
+    });
+
+    const [tasksCreated, tasksCompleted, tasksOverdue, meetingsHeld] = await Promise.all([
+      tasksCreatedQuery,
+      tasksCompletedQuery,
+      tasksOverdueQuery,
+      meetingsHeldQuery
+    ]);
+
+    const rawData = { tasksCreated, tasksCompleted, tasksOverdue, meetingsHeld };
+
+    // 3. Call the AI Service
+    const reportText = await generateAIReport(leaderName, team, startDate, endDate, rawData);
+
+    // 4. Send the AI-generated text back to the client
+    res.json({ report: reportText });
+
+  } catch (error) {
+    console.error('Report generation error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
