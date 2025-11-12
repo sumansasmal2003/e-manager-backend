@@ -401,36 +401,35 @@ exports.generateTeamReport = async (req, res) => {
   }
 
   try {
-    const team = await Team.findById(teamId);
+    const team = await Team.findById(teamId); //
     if (!team) {
       return res.status(404).json({ message: 'Team not found' });
     }
 
-    // 1. Convert dates
     const start = new Date(startDate);
     const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999); // Ensure end date covers the whole day
+    end.setHours(23, 59, 59, 999);
 
-    // 2. Fetch all raw data in parallel
-    const tasksCreatedQuery = Task.find({
+    // --- We are fetching the same data as before ---
+    const tasksCreatedQuery = Task.find({ //
       team: teamId,
       createdAt: { $gte: start, $lte: end }
-    });
+    }).select('title assignedTo'); // Get title and assignee
 
-    const tasksCompletedQuery = Task.find({
+    const tasksCompletedQuery = Task.find({ //
       team: teamId,
       status: 'Completed',
       updatedAt: { $gte: start, $lte: end } // Use updatedAt to see when it was completed
-    });
+    }).select('title assignedTo'); // Get title and assignee
 
-    const tasksOverdueQuery = Task.find({
+    const tasksOverdueQuery = Task.find({ //
       team: teamId,
       dueDate: { $lt: new Date() },
       status: { $ne: 'Completed' },
-      createdAt: { $lte: end } // Only tasks that existed during this period
+      createdAt: { $lte: end }
     });
 
-    const meetingsHeldQuery = Meeting.find({
+    const meetingsHeldQuery = Meeting.find({ //
       team: teamId,
       meetingTime: { $gte: start, $lte: end }
     });
@@ -442,16 +441,122 @@ exports.generateTeamReport = async (req, res) => {
       meetingsHeldQuery
     ]);
 
-    const rawData = { tasksCreated, tasksCompleted, tasksOverdue, meetingsHeld };
+    // --- Process data to be member-wise with full task lists ---
+    const memberActivity = {};
 
-    // 3. Call the AI Service
-    const reportText = await generateAIReport(leaderName, team, startDate, endDate, rawData);
+    // Helper to ensure member is initialized
+    const ensureMember = (name) => {
+      // Handle cases where assignee might be null or undefined
+      const memberName = name || 'Unassigned';
+      if (!memberActivity[memberName]) {
+        memberActivity[memberName] = { completedTasks: [], newTasks: [] };
+      }
+      return memberName;
+    };
 
-    // 4. Send the AI-generated text back to the client
+    tasksCreated.forEach(task => {
+      const memberName = ensureMember(task.assignedTo);
+      memberActivity[memberName].newTasks.push(task.title);
+    });
+
+    tasksCompleted.forEach(task => {
+      const memberName = ensureMember(task.assignedTo);
+      memberActivity[memberName].completedTasks.push(task.title);
+    });
+
+    // --- Create the final processed data object ---
+    const processedData = {
+      tasksCreatedCount: tasksCreated.length,
+      tasksCompletedCount: tasksCompleted.length,
+      tasksOverdueCount: tasksOverdue.length,
+      meetingsHeldCount: meetingsHeld.length,
+      memberActivity: memberActivity // This now contains full lists of task titles
+    };
+
+    // 3. Call the AI Service with the new data structure
+    const reportText = await generateAIReport(leaderName, team, startDate, endDate, processedData);
+
     res.json({ report: reportText });
 
   } catch (error) {
     console.error('Report generation error:', error.message);
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+// @desc    Add a Live Project link to a team
+// @route   POST /api/teams/:id/liveproject
+exports.addLiveProject = async (req, res) => {
+  try {
+    const { name, link } = req.body;
+
+    if (!name || !link) {
+      return res.status(400).json({ message: 'Please provide a name and a link' });
+    }
+
+    const team = await Team.findById(req.params.id);
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    team.liveProjects.push({ name, link }); // <-- Use liveProjects array
+    await team.save();
+
+    logActivity(
+      team._id,
+      req.user.id,
+      'LIVE_LINK_ADDED', // <-- Use new activity type
+      `Added Live Project: '${name}'`
+    );
+
+    const populatedTeam = await Team.findById(team._id)
+      .populate('owner', 'username email');
+
+    res.json(populatedTeam);
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+// @desc    Delete a Live Project link from a team
+// @route   DELETE /api/teams/:id/liveproject/:linkId
+exports.deleteLiveProject = async (req, res) => {
+  try {
+    const { linkId } = req.params; // <-- Use 'linkId'
+    const team = await Team.findById(req.params.id);
+
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized' });
+    }
+
+    const projectLink = team.liveProjects.id(linkId); // <-- Find in liveProjects
+    if (!projectLink) {
+      return res.status(404).json({ message: 'Project link not found' });
+    }
+
+    logActivity(
+      team._id,
+      req.user.id,
+      'LIVE_LINK_DELETED', // <-- Use new activity type
+      `Removed Live Project: '${projectLink.name}'`
+    );
+
+    projectLink.deleteOne();
+    await team.save();
+
+    const populatedTeam = await Team.findById(team._id)
+      .populate('owner', 'username email');
+
+    res.json(populatedTeam);
+
+  } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };

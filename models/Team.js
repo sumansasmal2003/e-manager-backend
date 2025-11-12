@@ -26,6 +26,19 @@ const githubRepoSchema = new mongoose.Schema({
   },
 });
 
+const liveProjectSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Please provide a project name'],
+    trim: true,
+  },
+  link: {
+    type: String,
+    required: [true, 'Please provide a project link'],
+    trim: true,
+  },
+});
+
 const teamSchema = new mongoose.Schema(
   {
     teamName: {
@@ -46,6 +59,7 @@ const teamSchema = new mongoose.Schema(
     ],
     figmaFiles: [figmaFileSchema],
     githubRepos: [githubRepoSchema],
+    liveProjects: [liveProjectSchema],
   },
   {
     timestamps: true,

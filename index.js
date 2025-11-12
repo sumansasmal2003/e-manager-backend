@@ -43,6 +43,8 @@ app.use('/api/user', userRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/teamnotes', teamNoteRoutes);
 app.use('/api/activity', activityRoutes);
+app.use('/api/members', require('./routes/memberRoutes'));
+app.use('/api/attendance', require('./routes/attendanceRoutes'));
 
 const PORT = process.env.PORT || 5000;
 

@@ -11,7 +11,9 @@ const {
   addGithubRepo,     // <-- ADD THIS
   deleteGithubRepo,
   removeTeamMember,
-  generateTeamReport
+  generateTeamReport,
+  addLiveProject,
+  deleteLiveProject
 } = require('../controllers/teamController');
 
 const { protect } = require('../middleware/authMiddleware');
@@ -50,5 +52,11 @@ router.route('/:id/github/:repoId')
 
   router.route('/:id/generate-report')
   .post(generateTeamReport);
+
+router.route('/:id/liveproject')
+  .post(addLiveProject); // POST /api/teams/some-team-id/liveproject
+
+router.route('/:id/liveproject/:linkId')
+  .delete(deleteLiveProject);
 
 module.exports = router;
