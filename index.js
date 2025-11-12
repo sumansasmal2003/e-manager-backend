@@ -14,6 +14,7 @@ const userRoutes = require('./routes/userRoutes');
 const calendarRoutes = require('./routes/calendarRoutes');
 const teamNoteRoutes = require('./routes/teamNoteRoutes');
 const activityRoutes = require('./routes/activityRoutes');
+const oneOnOneRoutes = require('./routes/oneOnOneRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -45,6 +46,8 @@ app.use('/api/teamnotes', teamNoteRoutes);
 app.use('/api/activity', activityRoutes);
 app.use('/api/members', require('./routes/memberRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
+app.use('/api/oneonones', oneOnOneRoutes);
+app.use('/api/search', require('./routes/searchRoutes'));
 
 const PORT = process.env.PORT || 5000;
 

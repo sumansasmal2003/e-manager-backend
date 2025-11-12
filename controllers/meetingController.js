@@ -1,6 +1,7 @@
 const Meeting = require('../models/Meeting');
 const { checkTeamMembership } = require('./taskController'); // Use shared check
 const axios = require('axios');
+const { logActivity } = require('../services/activityService');
 
 // Helper function to get Zoom Access Token
 const getZoomAccessToken = async () => {
