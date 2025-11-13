@@ -32,6 +32,8 @@ const activitySchema = new mongoose.Schema(
         'GITHUB_REPO_DELETED',
         'LIVE_LINK_ADDED',
         'LIVE_LINK_DELETED',
+        'MEETING_UPDATED', // <-- ADD THIS
+        'MEETING_DELETED',
       ],
     },
     // The human-readable text, e.g., "John Doe created task 'Design Homepage'"

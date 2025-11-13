@@ -2,6 +2,7 @@ const Meeting = require('../models/Meeting');
 const { checkTeamMembership } = require('./taskController'); // Use shared check
 const axios = require('axios');
 const { logActivity } = require('../services/activityService');
+const Team = require('../models/Team');
 
 // Helper function to get Zoom Access Token
 const getZoomAccessToken = async () => {
@@ -150,6 +151,108 @@ exports.getMeetingsForTeam = async (req, res) => {
     res.json(meetings);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+/**
+ * @desc    Update a meeting
+ * @route   PUT /api/meetings/meeting/:id
+ */
+exports.updateMeeting = async (req, res) => {
+  try {
+    const { title, agenda, meetingTime, meetingLink, participants } = req.body;
+    const meeting = await Meeting.findById(req.params.id);
+
+    if (!meeting) {
+      return res.status(404).json({ message: 'Meeting not found' });
+    }
+
+    // --- Authorization Check (remains the same) ---
+    const team = await Team.findById(meeting.team);
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found for this meeting' });
+    }
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized for this team' });
+    }
+
+    // --- Participant Validation (remains the same) ---
+    let finalParticipants = meeting.participants;
+    if (participants) {
+      // ... (existing participant logic)
+    }
+
+    // --- THIS IS THE FIX ---
+    // Update fields
+    meeting.title = title || meeting.title;
+    meeting.agenda = agenda || meeting.agenda;
+    meeting.meetingLink = meetingLink || meeting.meetingLink;
+    meeting.participants = finalParticipants;
+
+    // Manually parse the meetingTime string to avoid timezone errors
+    if (meetingTime) {
+      // The frontend sends "YYYY-MM-DDTHH:mm"
+      const [datePart, timePart] = meetingTime.split('T');
+      const [year, month, day] = datePart.split('-');
+      const [hour, minute] = timePart.split(':');
+
+      // Create a date object using the server's local time, but with the *exact numbers*
+      // This correctly interprets "the user's 14:00" as "the server's 14:00"
+      // which Mongoose then correctly converts to UTC for storage.
+      const userDate = new Date(year, month - 1, day, hour, minute);
+      meeting.meetingTime = userDate;
+    }
+    // --- END OF FIX ---
+
+    const updatedMeeting = await meeting.save();
+
+    logActivity(
+      updatedMeeting.team,
+      req.user.id,
+      'MEETING_UPDATED',
+      `Updated meeting '${updatedMeeting.title}'`
+    );
+
+    res.json(updatedMeeting);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+/**
+ * @desc    Delete a meeting
+ * @route   DELETE /api/meetings/meeting/:id
+ */
+exports.deleteMeeting = async (req, res) => {
+  try {
+    const meeting = await Meeting.findById(req.params.id);
+
+    if (!meeting) {
+      return res.status(404).json({ message: 'Meeting not found' });
+    }
+
+    // --- Authorization Check ---
+    const team = await Team.findById(meeting.team);
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found for this meeting' });
+    }
+    if (team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized for this team' });
+    }
+    // --- End Check ---
+
+    logActivity(
+      meeting.team,
+      req.user.id,
+      'MEETING_DELETED',
+      `Deleted meeting '${meeting.title}'`
+    );
+
+    await meeting.deleteOne();
+
+    res.json({ message: 'Meeting removed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
 
