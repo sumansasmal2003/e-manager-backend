@@ -37,6 +37,14 @@ const userSchema = new mongoose.Schema({
     select: false, // Don't send password in responses by default
   },
   connecteamAccounts: [connecteamAccountSchema],
+  passwordResetOTP: {
+    type: String,
+    select: false, // Don't send this in responses by default
+  },
+  passwordResetExpires: {
+    type: Date,
+    select: false, // Don't send this in responses by default
+  },
 }, {
   timestamps: true, // Adds createdAt and updatedAt fields
 });

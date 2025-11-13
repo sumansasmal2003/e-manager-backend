@@ -3,6 +3,9 @@ const Task = require('../models/Task');
 const Meeting = require('../models/Meeting');
 const Activity = require('../models/Activity');
 const MemberProfile = require('../models/MemberProfile');
+const Attendance = require('../models/Attendance');
+const { generateMemberPDFReport } = require('../services/memberReportService'); // <-- 2. IMPORT
+const { sendMemberReportEmail } = require('../services/emailService');
 
 // @desc    Get all unique members for the leader with their teams
 // @route   GET /api/members
@@ -91,6 +94,7 @@ exports.getMemberDetails = async (req, res) => {
       name: name,
       joiningDate: null,
       endingDate: null,
+      email: '',
     };
 
     res.json({ tasks, meetings, activities, profile: memberProfile }); // <-- 5. ADD PROFILE
@@ -101,12 +105,11 @@ exports.getMemberDetails = async (req, res) => {
   }
 };
 
-
 // --- 3. ADD THIS NEW FUNCTION ---
 // @desc    Create or update a member's profile
 // @route   PUT /api/members/profile
 exports.updateMemberProfile = async (req, res) => {
-  const { name, joiningDate, endingDate } = req.body;
+  const { name, joiningDate, endingDate, email } = req.body;
 
   if (!name) {
     return res.status(400).json({ message: 'Member name is required' });
@@ -121,6 +124,7 @@ exports.updateMemberProfile = async (req, res) => {
         $set: {
           joiningDate: joiningDate || null,
           endingDate: endingDate || null,
+          email: email || '',
         }
       },
       { new: true, upsert: true, runValidators: true }
@@ -130,5 +134,67 @@ exports.updateMemberProfile = async (req, res) => {
   } catch (error) {
     console.error('Error in updateMemberProfile:', error.message);
     res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+/**
+ * @desc    Generate and email a report for a specific member
+ * @route   POST /api/members/send-report
+ */
+exports.sendMemberReport = async (req, res) => {
+  const { memberName } = req.body;
+  const leaderId = req.user.id;
+
+  try {
+    // 1. Find profile (remains the same)
+    const profile = await MemberProfile.findOne({
+      leader: leaderId,
+      name: memberName,
+    });
+
+    if (!profile) {
+      return res.status(404).json({ message: 'Member profile not found.' });
+    }
+    if (!profile.email) {
+      return res.status(400).json({ message: 'Member does not have an email on file. Please add one first.' });
+    }
+
+    // 2. Get all teams (remains the same)
+    const teams = await Team.find({ owner: leaderId }).select('_id');
+    const teamIds = teams.map(t => t._id);
+
+    // --- 3. DEFINE DATE RANGE (THE FIX) ---
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 30); // 30 days ago
+
+    // 4. Fetch all data for this member in parallel *with date range*
+    const [tasks, attendance] = await Promise.all([
+      Task.find({
+        team: { $in: teamIds },
+        assignedTo: memberName,
+        $or: [
+          { status: { $in: ['Pending', 'In Progress'] } }, // All active tasks
+          { updatedAt: { $gte: startDate, $lte: endDate }, status: 'Completed' } // Or tasks completed in the period
+        ]
+      }),
+      Attendance.find({
+        leader: leaderId,
+        member: memberName,
+        date: { $gte: startDate, $lte: endDate } // <-- FIX: Only get attendance for the last 30 days
+      }),
+    ]);
+
+    // 5. Generate the PDF (pass the date range for context)
+    const pdfBuffer = await generateMemberPDFReport(profile, tasks, attendance, startDate, endDate);
+
+    // 6. Send the email
+    await sendMemberReportEmail(profile.email, profile.name, pdfBuffer);
+
+    res.json({ message: `Report successfully sent to ${profile.email}.` });
+
+  } catch (error) {
+    console.error('Send Member Report Error:', error.message);
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };

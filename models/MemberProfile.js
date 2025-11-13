@@ -14,6 +14,16 @@ const memberProfileSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    email: {
+      type: String,
+      trim: true,
+      default: '',
+      // Optional: Add email validation
+      match: [
+        /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
+        'Please fill a valid email address',
+      ],
+    },
     joiningDate: {
       type: Date,
       default: null,

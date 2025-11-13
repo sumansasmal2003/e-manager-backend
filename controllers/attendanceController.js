@@ -82,7 +82,7 @@ exports.getMembers = async (req, res) => {
     const profiles = await MemberProfile.find({
       leader: req.user.id,
       name: { $in: uniqueMemberNames }
-    }).select('name joiningDate endingDate');
+    }).select('name joiningDate endingDate email');
 
     // 3. Create a map of profiles for easy lookup
     const profileMap = new Map();
@@ -97,6 +97,7 @@ exports.getMembers = async (req, res) => {
         name: name,
         joiningDate: profile ? profile.joiningDate : null,
         endingDate: profile ? profile.endingDate : null,
+        email: profile ? profile.email : '',
       };
     });
 
@@ -269,7 +270,7 @@ exports.exportAttendanceData = async (req, res) => {
         // If we're here, the member was active on this day.
         // Add them to the report.
         const key = `${dateKey}|${member}`;
-        const status = recordMap.get(key) || 'Present'; // Default to 'Present'
+        const status = recordMap.get(key) || 'Not Recorded'; // Default to 'Present'
 
         fullReport.push({
           date: new Date(d), // Keep as Date object for sorting

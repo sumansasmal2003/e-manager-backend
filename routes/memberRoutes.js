@@ -3,7 +3,8 @@ const router = express.Router();
 const {
   getAllMembers,
   getMemberDetails,
-  updateMemberProfile
+  updateMemberProfile,
+  sendMemberReport
 } = require('../controllers/memberController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -18,5 +19,8 @@ router.route('/details')
 
   router.route('/profile')
   .put(updateMemberProfile);
+
+router.route('/send-report')
+  .post(sendMemberReport);
 
 module.exports = router;
