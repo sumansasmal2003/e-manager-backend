@@ -36,6 +36,7 @@ exports.registerUser = async (req, res) => {
         email: user.email,
         token: generateToken(user._id),
         connecteamAccounts: user.connecteamAccounts || [],
+        googleCalendarConnected: user.googleCalendarConnected
       });
 
       // We will add the nodemailer welcome email here later!
@@ -59,18 +60,21 @@ exports.loginUser = async (req, res) => {
       return res.status(400).json({ message: 'Please provide email and password' });
     }
 
-    // 2. Find user by email (and explicitly include password)
-    const user = await User.findOne({ email }).select('+password');
+    // 2. Find user by email (and explicitly include password AND googleCalendarConnected)
+    // --- THIS IS THE FIRST PART OF THE FIX ---
+    const user = await User.findOne({ email }).select('+password +googleCalendarConnected');
 
     // 3. Check if user exists and password matches
     if (user && (await user.matchPassword(password))) {
       // 4. Respond with user data and token
+      // --- THIS IS THE SECOND PART OF THE FIX ---
       res.json({
         _id: user._id,
         username: user.username,
         email: user.email,
         token: generateToken(user._id),
-        connecteamAccounts: user.connecteamAccounts || [],
+        connecteamAccounts: user.connecteamAccounts,
+        googleCalendarConnected: user.googleCalendarConnected // <-- This will now have the value
       });
     } else {
       res.status(401).json({ message: 'Invalid email or password' });
@@ -109,7 +113,7 @@ exports.forgotPassword = async (req, res) => {
     await user.save();
 
     // 3. Send email (fire and forget)
-    sendPasswordResetEmail(user.email, otp);
+    sendPasswordResetEmail(user.email, otp, user._id);
 
     res.json({ message: 'If an account with this email exists, a reset code has been sent.' });
 

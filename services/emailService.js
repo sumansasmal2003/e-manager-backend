@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const EmailLog = require('../models/EmailLog');
 
 const createTransporter = () => {
   return nodemailer.createTransport({
@@ -11,7 +12,7 @@ const createTransporter = () => {
   });
 };
 
-const sendEmail = async (options) => {
+const sendEmail = async (options, userId, memberName) => {
   const transporter = createTransporter();
 
   const mailOptions = {
@@ -23,12 +24,30 @@ const sendEmail = async (options) => {
     attachments: options.attachments || [], // <-- Handle attachments
   };
 
+  const logEntry = {
+    user: userId,
+    toEmail: options.to,
+    memberName: memberName,
+    subject: options.subject,
+    html: options.html,
+  };
+
   try {
     const info = await transporter.sendMail(mailOptions);
     console.log('Email sent: ' + info.response);
+    await EmailLog.create({ ...logEntry, status: 'Sent' });
     return true; // Indicate success
   } catch (error) {
     console.error('Error sending email:', error);
+    try {
+      await EmailLog.create({
+        ...logEntry,
+        status: 'Failed',
+        error: error.message,
+      });
+    } catch (logError) {
+      console.error('Failed to even log the email error:', logError);
+    }
     throw new Error('Failed to send email.'); // Throw error this time
   }
 };
@@ -39,7 +58,7 @@ const sendEmail = async (options) => {
  * @param {string} email - The user's email address
  * @param {string} otp - The 6-digit OTP
  */
-exports.sendPasswordResetEmail = async (email, otp) => {
+exports.sendPasswordResetEmail = async (email, otp, userId) => {
   const subject = 'Your E-Manager Password Reset Code (Valid for 10 min)';
 
   const html = `
@@ -65,7 +84,7 @@ exports.sendPasswordResetEmail = async (email, otp) => {
     subject,
     text,
     html,
-  });
+  }, userId, null);
 };
 
 /**
@@ -75,7 +94,7 @@ exports.sendPasswordResetEmail = async (email, otp) => {
  * @param {string} memberName - The member's name
  * @param {Buffer} pdfBuffer - The generated PDF data
  */
-exports.sendMemberReportEmail = async (toEmail, memberName, pdfBuffer) => {
+exports.sendMemberReportEmail = async (toEmail, memberName, pdfBuffer, userId) => {
   const subject = `Your E-Manager Performance Report - ${memberName}`;
 
   const html = `
@@ -105,5 +124,5 @@ exports.sendMemberReportEmail = async (toEmail, memberName, pdfBuffer) => {
     text,
     html,
     attachments,
-  });
+  }, userId, memberName);
 };

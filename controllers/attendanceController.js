@@ -305,3 +305,65 @@ const format = (date, formatStr) => {
   const day = d.getUTCDate().toString().padStart(2, '0');
   return formatStr.replace('yyyy', year).replace('MM', month).replace('dd', day);
 };
+
+// @desc    Set a specific date as 'Holiday' for all members
+// @route   POST /api/attendance/bulk-holiday
+exports.setBulkHoliday = async (req, res) => {
+  const { date } = req.body;
+  const leaderId = req.user.id;
+
+  if (!date) {
+    return res.status(400).json({ message: 'Date is required' });
+  }
+
+  try {
+    // 1. Find all members for this leader
+    // (This logic is from your getMembers function)
+    const teams = await Team.find({ owner: leaderId }).select('members');
+    const memberSet = new Set();
+    teams.forEach(team => {
+      team.members.forEach(member => {
+        memberSet.add(member);
+      });
+    });
+    const uniqueMemberNames = [...memberSet];
+
+    if (uniqueMemberNames.length === 0) {
+      return res.status(200).json({ message: 'No members to update' });
+    }
+
+    // 2. Create the target date (start of day UTC)
+    const targetDate = new Date(date);
+    targetDate.setUTCHours(0, 0, 0, 0);
+
+    // 3. Create an array of "upsert" operations
+    // This will create a new record if one doesn't exist,
+    // or update an existing one (e.g., from 'Present' to 'Holiday').
+    const operations = uniqueMemberNames.map(memberName => ({
+      updateOne: {
+        filter: {
+          leader: leaderId,
+          member: memberName,
+          date: targetDate,
+        },
+        update: {
+          $set: { status: 'Holiday' },
+        },
+        upsert: true, // This is the most important part
+      },
+    }));
+
+    // 4. Execute all operations in a single, efficient database call
+    const result = await Attendance.bulkWrite(operations);
+
+    res.json({
+      message: 'Sunday set as holiday for all members',
+      matched: result.matchedCount,
+      modified: result.modifiedCount,
+      upserted: result.upsertedCount,
+    });
+  } catch (error) {
+    console.error('Bulk Holiday Set Error:', error.message);
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};

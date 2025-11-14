@@ -6,13 +6,14 @@ const {
   deleteConnecteamAccount, // <-- CHANGED
   updateUserProfile,    // <-- ADD THIS
   changeUserPassword,
+  deleteUserAccount
 } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 
 // All these routes are protected
 router.use(protect);
 
-router.route('/profile').get(getUserProfile).put(updateUserProfile);;
+router.route('/profile').get(getUserProfile).put(updateUserProfile).delete(deleteUserAccount);
 router.route('/connecteam')
   .post(addConnecteamAccount);
 

@@ -6,7 +6,8 @@ const {
   getMembers,
   getAttendanceSummary,
   getAttendanceForDate,
-  exportAttendanceData
+  exportAttendanceData,
+  setBulkHoliday
 } = require('../controllers/attendanceController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -16,6 +17,9 @@ router.use(protect);
 router.route('/')
   .get(getAttendance)
   .post(setAttendance);
+
+  router.route('/bulk-holiday')
+  .post(setBulkHoliday);
 
 // This re-uses the logic from memberController, but is fine to have here
 router.route('/members')

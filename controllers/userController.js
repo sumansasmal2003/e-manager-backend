@@ -1,4 +1,14 @@
 const User = require('../models/User');
+const Team = require('../models/Team');
+const Task = require('../models/Task');
+const Note = require('../models/Note');
+const TeamNote = require('../models/TeamNote');
+const Meeting = require('../models/Meeting');
+const Activity = require('../models/Activity');
+const Attendance = require('../models/Attendance');
+const EmailLog = require('../models/EmailLog');
+const MemberProfile = require('../models/MemberProfile');
+const OneOnOne = require('../models/OneOnOne');
 
 // @desc    Get logged-in user's profile
 // @route   GET /api/user/profile
@@ -10,8 +20,8 @@ exports.getUserProfile = async (req, res) => {
       _id: user._id,
       username: user.username,
       email: user.email,
-      connecteamAdminLink: user.connecteamAdminLink, // <-- UPDATED
-      googleCalendarConnected: user.googleCalendarConnected,
+      connecteamAccounts: user.connecteamAccounts, // <-- Must be this
+      googleCalendarConnected: user.googleCalendarConnected // <-- Must be included
     });
   } else {
     res.status(404).json({ message: 'User not found' });
@@ -141,6 +151,48 @@ exports.changeUserPassword = async (req, res) => {
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+/**
+ * @desc    Delete user account and all associated data
+ * @route   DELETE /api/user/profile
+ */
+exports.deleteUserAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 1. Find all teams owned by the user
+    const userTeams = await Team.find({ owner: userId }).select('_id');
+    const teamIds = userTeams.map(team => team._id);
+
+    // 2. Perform a massive cascading delete in parallel
+    await Promise.all([
+      // Delete all data associated with the user's teams
+      Task.deleteMany({ team: { $in: teamIds } }),
+      Meeting.deleteMany({ team: { $in: teamIds } }),
+      TeamNote.deleteMany({ team: { $in: teamIds } }),
+      Activity.deleteMany({ team: { $in: teamIds } }),
+
+      // Delete the teams themselves
+      Team.deleteMany({ owner: userId }),
+
+      // Delete all personal data linked to the user
+      Note.deleteMany({ user: userId }),
+      Attendance.deleteMany({ leader: userId }),
+      MemberProfile.deleteMany({ leader: userId }),
+      OneOnOne.deleteMany({ leader: userId }),
+      EmailLog.deleteMany({ user: userId }),
+
+      // Finally, delete the user
+      User.findByIdAndDelete(userId)
+    ]);
+
+    res.json({ message: 'Account and all associated data deleted successfully.' });
+
+  } catch (error) {
+    console.error('Delete User Account Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };

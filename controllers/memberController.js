@@ -189,7 +189,7 @@ exports.sendMemberReport = async (req, res) => {
     const pdfBuffer = await generateMemberPDFReport(profile, tasks, attendance, startDate, endDate);
 
     // 6. Send the email
-    await sendMemberReportEmail(profile.email, profile.name, pdfBuffer);
+    await sendMemberReportEmail(profile.email, profile.name, pdfBuffer, leaderId);
 
     res.json({ message: `Report successfully sent to ${profile.email}.` });
 
