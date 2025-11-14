@@ -45,6 +45,9 @@ const userSchema = new mongoose.Schema({
     type: Date,
     select: false, // Don't send this in responses by default
   },
+  googleAccessToken: { type: String, select: false },
+  googleRefreshToken: { type: String, select: false },
+  googleCalendarConnected: { type: Boolean, default: false },
 }, {
   timestamps: true, // Adds createdAt and updatedAt fields
 });

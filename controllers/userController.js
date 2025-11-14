@@ -11,6 +11,7 @@ exports.getUserProfile = async (req, res) => {
       username: user.username,
       email: user.email,
       connecteamAdminLink: user.connecteamAdminLink, // <-- UPDATED
+      googleCalendarConnected: user.googleCalendarConnected,
     });
   } else {
     res.status(404).json({ message: 'User not found' });

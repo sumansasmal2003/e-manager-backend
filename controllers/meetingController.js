@@ -3,6 +3,8 @@ const { checkTeamMembership } = require('./taskController'); // Use shared check
 const axios = require('axios');
 const { logActivity } = require('../services/activityService');
 const Team = require('../models/Team');
+const { getGoogleCalendarClient } = require('../services/googleCalendarService'); // <-- IMPORT HELPER
+const User = require('../models/User');
 
 // Helper function to get Zoom Access Token
 const getZoomAccessToken = async () => {
@@ -27,46 +29,33 @@ const getZoomAccessToken = async () => {
 // @desc    Generate a Zoom meeting link
 // @route   POST /api/meetings/generate-zoom
 exports.generateZoomMeeting = async (req, res) => {
-  const { title, meetingTime } = req.body;
+  const { title, meetingTime, timezone } = req.body;
 
   try {
     const accessToken = await getZoomAccessToken();
     const zoomApiUrl = 'https://api.zoom.us/v2/users/me/meetings';
 
-    // --- START OF NEW FIX ---
+    let formattedStartTime;
+    try {
+      const dateObj = new Date(meetingTime);
 
-    let startTime;
-    if (meetingTime) {
-      // The frontend sends a string like "2025-11-10T14:30"
-      // We must manually parse it to avoid time zone errors.
+      // 1. .toISOString() gives "2025-11-14T09:00:00.000Z"
+      // 2. We split at the decimal point to remove milliseconds.
+      // 3. We add the "Z" back to signify UTC.
+      formattedStartTime = dateObj.toISOString().split('.')[0] + "Z";
+      // The result is "2025-11-14T09:00:00Z", which Zoom accepts.
 
-      const [datePart, timePart] = meetingTime.split('T');
-      const [year, month, day] = datePart.split('-');
-      const [hour, minute] = timePart.split(':');
-
-      // This creates a date object using the server's local time zone,
-      // but with the *exact numbers* provided by the user.
-      // new Date(YYYY, MM (0-11), DD, HH, mm)
-      const userDate = new Date(year, month - 1, day, hour, minute);
-
-      // .toISOString() converts this date to the UTC "Z" format
-      // that the Zoom API requires.
-      startTime = userDate.toISOString();
-
-    } else {
-      // Fallback if meetingTime is somehow still empty
-      startTime = new Date().toISOString();
+    } catch (e) {
+      return res.status(400).json({ message: 'Invalid meetingTime format. Expected ISO string.' });
     }
-
-    // --- END OF NEW FIX ---
 
     const meetingDetails = {
       topic: title || 'New E-Manager Meeting',
       type: 2, // Scheduled meeting
-      start_time: startTime, // <-- Use the new, correctly formatted time
+      start_time: formattedStartTime, // <-- Use the new, correctly formatted time
       duration: 60,
       // By sending an ISO string (ends in "Z"), we must specify UTC.
-      timezone: 'UTC',
+      timezone: timezone || 'UTC',
       settings: {
         join_before_host: true,
         mute_upon_entry: true,
@@ -132,6 +121,38 @@ exports.scheduleMeeting = async (req, res) => {
   'MEETING_SCHEDULED',
   `Scheduled meeting '${createdMeeting.title}' for ${new Date(createdMeeting.meetingTime).toLocaleDateString()}`
 );
+try {
+      // Find the user with their tokens
+      const user = await User.findById(req.user.id).select('+googleAccessToken +googleRefreshToken');
+      if (user.googleCalendarConnected) {
+        const calendar = await getGoogleCalendarClient(user);
+
+        // Assume meetingTime is a full ISO string from the frontend
+        const startTime = new Date(meetingTime);
+        const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour duration
+
+        const event = {
+          summary: title,
+          description: agenda,
+          start: {
+            dateTime: startTime.toISOString(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
+          end: {
+            dateTime: endTime.toISOString(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
+        };
+
+        await calendar.events.insert({
+          calendarId: 'primary',
+          resource: event,
+        });
+      }
+    } catch (gcalError) {
+      console.error('Failed to push event to Google Calendar:', gcalError.message);
+      // Do not send this error to the user, just log it.
+    }
 res.status(201).json(createdMeeting);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
@@ -191,16 +212,7 @@ exports.updateMeeting = async (req, res) => {
 
     // Manually parse the meetingTime string to avoid timezone errors
     if (meetingTime) {
-      // The frontend sends "YYYY-MM-DDTHH:mm"
-      const [datePart, timePart] = meetingTime.split('T');
-      const [year, month, day] = datePart.split('-');
-      const [hour, minute] = timePart.split(':');
-
-      // Create a date object using the server's local time, but with the *exact numbers*
-      // This correctly interprets "the user's 14:00" as "the server's 14:00"
-      // which Mongoose then correctly converts to UTC for storage.
-      const userDate = new Date(year, month - 1, day, hour, minute);
-      meeting.meetingTime = userDate;
+      meeting.meetingTime = meetingTime;
     }
     // --- END OF FIX ---
 

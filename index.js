@@ -48,6 +48,7 @@ app.use('/api/members', require('./routes/memberRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
 app.use('/api/oneonones', oneOnOneRoutes);
 app.use('/api/search', require('./routes/searchRoutes'));
+app.use('/api/auth/google', require('./routes/googleAuthRoutes'));
 
 const PORT = process.env.PORT || 5000;
 
