@@ -2,6 +2,7 @@ const Task = require('../models/Task');
 const Team = require('../models/Team');
 const TeamNote = require('../models/TeamNote');
 const { logActivity } = require('../services/activityService');
+const { generateAISubtasks } = require('../services/reportService');
 
 // We re-use this check from teamController, but we need to fetch the team
 const checkTeamMembership = async (req, res, next) => {
@@ -177,6 +178,26 @@ await task.deleteOne();
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+/**
+ * @desc    Generate sub-tasks from a complex task title using AI
+ * @route   POST /api/tasks/generate-subtasks
+ */
+exports.generateSubtasks = async (req, res) => {
+  const { taskTitle } = req.body;
+
+  if (!taskTitle) {
+    return res.status(400).json({ message: 'Please provide a task title' });
+  }
+
+  try {
+    const subtasks = await generateAISubtasks(taskTitle);
+    res.json(subtasks);
+  } catch (error) {
+    console.error('Generate Subtasks Error:', error.message);
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
 

@@ -5,13 +5,17 @@ const {
   updateTask,
   checkTeamMembership, // Import the middleware
   createBulkTasks,
-  deleteTask
+  deleteTask,
+  generateSubtasks
 } = require('../controllers/taskController');
 
 const { protect } = require('../middleware/authMiddleware');
 
 // Apply 'protect' middleware to all task routes
 router.use(protect);
+
+router.route('/generate-subtasks')
+  .post(generateSubtasks);
 
 // Routes for a specific team
 router.route('/:teamId')

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getOverviewStats, getActionItems } = require('../controllers/statsController');
+const { getOverviewStats, getActionItems, getAIDailyBriefing } = require('../controllers/statsController');
 const { protect } = require('../middleware/authMiddleware');
 
 // All routes here are protected
@@ -9,5 +9,7 @@ router.use(protect);
 router.route('/overview').get(getOverviewStats);
 
 router.route('/action-items').get(getActionItems);
+
+router.route('/briefing').get(protect, getAIDailyBriefing);
 
 module.exports = router;

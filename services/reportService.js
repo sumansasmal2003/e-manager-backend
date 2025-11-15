@@ -105,3 +105,337 @@ Begin Report:
     throw new Error('Failed to generate AI summary.');
   }
 };
+
+/**
+ * Generates a concise, personal daily briefing using Gemini AI.
+ * @param {string} username - The user's name for personalization.
+ * @param {object} actionItems - The object containing tasks and meetings.
+ * @returns {string} The AI-generated briefing text in Markdown format.
+ */
+exports.generateAIDailyBriefing = async (username, actionItems) => {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }); // Use 'pro' for this task
+
+  // 1. Serialize the data into a simple text format for the AI
+  let dataSummary = '--- DATA START ---\n';
+  dataSummary += `Today's Date: ${new Date().toLocaleDateString()}\n`;
+  dataSummary += `User's Name: ${username}\n\n`;
+
+  // Add Meetings
+  if (actionItems.todayMeetings.length > 0) {
+    dataSummary += 'Today\'s Meetings:\n';
+    actionItems.todayMeetings.forEach(m => {
+      dataSummary += `- ${new Date(m.meetingTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}: ${m.title} (Team: ${m.team.teamName})\n`;
+    });
+  } else {
+    dataSummary += 'No meetings scheduled for today.\n';
+  }
+  dataSummary += '\n';
+
+  // Add Overdue Tasks
+  if (actionItems.actionTasks.overdue.length > 0) {
+    dataSummary += 'URGENT - Overdue Tasks:\n';
+    actionItems.actionTasks.overdue.forEach(t => {
+      dataSummary += `- ${t.title} (Assigned to: ${t.assignedTo})\n`;
+    });
+  } else {
+    dataSummary += 'No overdue tasks.\n';
+  }
+  dataSummary += '\n';
+
+  // Add Tasks Due Today
+  if (actionItems.actionTasks.dueToday.length > 0) {
+    dataSummary += 'Tasks Due Today:\n';
+    actionItems.actionTasks.dueToday.forEach(t => {
+      dataSummary += `- ${t.title} (Assigned to: ${t.assignedTo})\n`;
+    });
+  } else {
+    dataSummary += 'No tasks due today.\n';
+  }
+  dataSummary += '\n';
+
+  // Add Weekly Notes
+  if (actionItems.weeklyNotes.length > 0) {
+    dataSummary += 'Personal Weekly Goals/Notes:\n';
+    actionItems.weeklyNotes.forEach(n => {
+      dataSummary += `- ${n.title}\n`;
+    });
+  }
+  dataSummary += '--- DATA END ---\n';
+
+  // 2. Create the prompt
+  const prompt = `
+You are an expert executive assistant. Your name is "Gemini".
+You are writing a daily briefing for a team leader named ${username}.
+Your tone should be professional, encouraging, and clear.
+You MUST follow this structure:
+1.  Start with a friendly, brief greeting.
+2.  Check for "Today's Meetings". If there are any, list the most important ones.
+3.  Check for "URGENT - Overdue Tasks". If there are any, highlight this section as the top priority.
+4.  List the "Tasks Due Today".
+5.  If there are "Personal Weekly Goals/Notes", mention one or two as a reminder.
+6.  Conclude with a short, motivational closing sentence.
+
+Use markdown for formatting (like **bolding** for urgent items and lists).
+Do NOT include the "--- DATA ---" markers in your final response.
+Keep the entire briefing concise (around 100-150 words).
+
+Based on the provided data, write the daily briefing.
+
+${dataSummary}
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    return text;
+  } catch (error) {
+    console.error('Error generating AI briefing:', error);
+    throw new Error('Failed to generate AI summary.');
+  }
+};
+
+/**
+ * Generates a professional, AI-powered performance report for a single member.
+ * @param {object} profile - The member's profile (name, email, joiningDate)
+ * @param {Array} tasks - The member's tasks
+ * @param {Array} attendance - The member's attendance records
+ * @param {string} startDate - The start date (ISO string)
+ * @param {string} endDate - The end date (ISO string)
+ * @returns {string} The AI-generated report text in Markdown format.
+ */
+exports.generateAIMemberReport = async (profile, tasks, attendance, startDate, endDate) => {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  // --- 1. Calculate Statistics ---
+
+  // --- THIS IS THE FIX ---
+  // Get the start of today (in the server's timezone)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // --- END OF FIX ---
+
+  const totalTasks = tasks.length;
+  const completedTasks = tasks.filter(t => t.status === 'Completed');
+
+  // --- THIS LOGIC IS NOW CORRECTED ---
+  // "Overdue" now means due *before* the start of today.
+  const overdueTasks = tasks.filter(t =>
+    t.status !== 'Completed' &&
+    t.dueDate && // ensure it has a due date
+    new Date(t.dueDate) < today
+  );
+  // --- END OF CORRECTION ---
+
+  const pendingTasks = tasks.filter(t => t.status === 'Pending' || t.status === 'In Progress');
+
+  const presentDays = attendance.filter(a => a.status === 'Present').length;
+  const absentDays = attendance.filter(a => a.status === 'Absent').length;
+  const leaveDays = attendance.filter(a => a.status === 'Leave').length;
+  const totalAttendanceDays = presentDays + absentDays + leaveDays;
+  const attendanceRate = totalAttendanceDays > 0 ? Math.round((presentDays / totalAttendanceDays) * 100) : 100;
+
+  // --- 2. Serialize Data for the AI ---
+  // (This section remains unchanged, but the data it receives is now more accurate)
+  let dataSummary = `
+## Member Profile:
+- Name: ${profile.name}
+- Email: ${profile.email}
+- Report Period: ${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}
+
+## Performance Statistics:
+- Total Tasks Assigned: ${totalTasks}
+- Tasks Completed: ${completedTasks.length}
+- Tasks Pending/In Progress: ${pendingTasks.length}
+- Tasks Overdue: ${overdueTasks.length}
+- Attendance Rate: ${attendanceRate}% (${presentDays} Present, ${absentDays} Absent, ${leaveDays} Leave)
+
+## Detailed Task List:
+`;
+
+  if (tasks.length > 0) {
+    tasks.forEach(task => {
+      dataSummary += `- **${task.title}** (Status: ${task.status}, Due: ${task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'N/A'})\n`;
+    });
+  } else {
+    dataSummary += "No tasks assigned in this period.\n";
+  }
+
+  // --- 3. This is our advanced prompt ---
+  // (The prompt itself doesn't need to change, as it just reports on the
+  // now-corrected `overdueTasks` variable)
+  const prompt = `
+You are a professional Senior Project Manager. Your task is to write a personalized, detailed performance report FOR a team member named "${profile.name}".
+The report is from their team leader and covers their performance from ${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}.
+You MUST output your entire response in simple MARKDOWN format.
+
+**Report Structure:**
+
+1.  **# Performance Report: ${profile.name}**
+    (A main title)
+
+2.  **## Executive Summary**
+    (Write a 2-3 paragraph high-level summary. Start by addressing the member directly (e.g., "Hello ${profile.name}, here is your report...").
+    Analyze their performance based on the stats: Are they completing tasks on time? Is their attendance strong?
+    Acknowledge their hard work and highlight both strengths and areas for improvement.)
+
+3.  **## Task Performance Analysis**
+    (Use the 'Performance Statistics' data.
+    -   Start with a summary paragraph explaining what the task numbers mean (e.g., "You completed ${completedTasks.length} out of ${totalTasks} tasks...").
+    -   **Crucially**, mention the **${overdueTasks.length} overdue tasks** and list them if there are any. This is the most important area to follow up on.)
+
+4.  **## Attendance Summary**
+    (Analyze the attendance data.
+    -   State their attendance rate (${attendanceRate}%) and what that means (e.g., "Your attendance has been excellent...").
+    -   Mention the number of absent or leave days and frame it as "We've logged ${absentDays} absent days..." etc.)
+
+5.  **## Concluding Remarks**
+    (A brief, encouraging closing paragraph. For example: "Overall, your performance has been solid... Let's focus on addressing the overdue tasks in the next period. Keep up the great work.")
+
+---
+**RAW DATA TO USE:**
+${dataSummary}
+---
+
+Begin Report (output in simple Markdown, starting with the '# Performance Report' title):
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    return text;
+  } catch (error) {
+    console.error('Error generating AI member report:', error);
+    throw new Error('Failed to generate AI summary.');
+  }
+};
+
+/**
+ * Generates 1-on-1 talking points for a specific member.
+ * @param {object} profile - The member's profile
+ * @param {Array} tasks - The member's tasks
+ * @param {Array} activities - The member's recent activities
+ * @returns {string} The AI-generated talking points in a simple string format.
+ */
+exports.generateAITalkingPoints = async (profile, tasks, activities) => {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  // --- 1. Calculate Statistics & Filter Data ---
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const completedTasks = tasks.filter(t => t.status === 'Completed');
+  const overdueTasks = tasks.filter(t =>
+    t.status !== 'Completed' && t.dueDate && new Date(t.dueDate) < today
+  );
+  const pendingTasks = tasks.filter(t => t.status === 'In Progress' || (t.status === 'Pending' && !overdueTasks.includes(t)));
+
+  // --- 2. Serialize Data for the AI ---
+  let dataSummary = `
+## Member: ${profile.name}
+Today's Date: ${today.toLocaleDateString()}
+
+## Task Summary:
+- **Overdue Tasks (${overdueTasks.length}):**
+${overdueTasks.length > 0 ? overdueTasks.map(t => `  - ${t.title} (Due: ${new Date(t.dueDate).toLocaleDateString()})`).join('\n') : '  - None. Great job!'}
+- **In Progress Tasks (${pendingTasks.length}):**
+${pendingTasks.length > 0 ? pendingTasks.map(t => `  - ${t.title}`).join('\n') : '  - None.'}
+- **Recently Completed Tasks (${completedTasks.length}):**
+${completedTasks.length > 0 ? completedTasks.map(t => `  - ${t.title}`).join('\n') : '  - None.'}
+
+## Recent Activity Log (Last 30 events):
+${activities.length > 0 ? activities.map(a => `  - ${a.details} (by ${a.user?.username || 'user'})`).join('\n') : '  - No recent activity mentions.'}
+`;
+
+  // --- 3. The Prompt ---
+  const prompt = `
+You are a senior team leader and an expert manager. You are preparing for a 1-on-1 meeting with your team member, ${profile.name}.
+Based *only* on the data provided, generate a short, bulleted list of 3-5 talking points for the meeting.
+Your tone should be constructive and supportive.
+
+- **Start with praise:** Find something positive (e.g., completed tasks, no overdue tasks).
+- **Then, address blockers:** Gently ask about any "In Progress" tasks to see if they need help.
+- **Finally, address concerns:** List any "Overdue Tasks" as the top priority to discuss and resolve.
+- If there is no data (e.g., no tasks), generate general check-in points.
+
+**Rules:**
+- Be very concise.
+- Use simple bullet points (e.g., "- ...").
+- Do NOT use markdown headers (like # or ##).
+- Address the points *about* the member, not *to* the member (e.g., use "Discuss..." or "Praise..." not "You did...").
+
+---
+**DATA TO USE:**
+${dataSummary}
+---
+
+Begin Talking Points:
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    return text;
+  } catch (error) {
+    console.error('Error generating AI talking points:', error);
+    throw new Error('Failed to generate AI summary.');
+  }
+};
+
+/**
+ * Breaks down a complex task into smaller sub-tasks using AI.
+ * @param {string} taskTitle - The complex task string from the user.
+ * @returns {Promise<Array<{title: string, description: string}>>} A promise that resolves to an array of sub-task objects.
+ */
+exports.generateAISubtasks = async (taskTitle) => {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  // 1. The Prompt (remains the same)
+  const prompt = `
+You are a senior project manager. A user has provided a complex task: "${taskTitle}".
+Your job is to break this task down into a list of 3-5 smaller, actionable sub-tasks.
+
+**CRITICAL:** You must return **ONLY** a valid, minified JSON array of objects.
+Do not include any text, markdown, or commentary before or after the JSON.
+Each object in the array must have two keys: "title" (string) and "description" (string).
+
+**Example Response:**
+[{"title":"Design user interface mockups","description":"Create high-fidelity mockups in Figma for all landing page sections."},{"title":"Develop responsive HTML/CSS","description":"Code the frontend of the landing page, ensuring it works on desktop and mobile."},{"title":"Integrate with email form","description":"Hook up the contact form to the backend email service."}]
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+
+    // --- 2. THIS IS THE FIX ---
+    // We will find the first '[' and the last ']' in the response
+    // to extract the JSON array and ignore the "```json" wrapper.
+    try {
+      const firstBracket = text.indexOf('[');
+      const lastBracket = text.lastIndexOf(']');
+
+      if (firstBracket === -1 || lastBracket === -1) {
+        throw new Error('AI response did not contain a JSON array.');
+      }
+
+      // Slice the string from the first '[' to the last ']'
+      const jsonString = text.substring(firstBracket, lastBracket + 1);
+
+      const subtasks = JSON.parse(jsonString);
+      return subtasks;
+
+    } catch (jsonError) {
+      console.error('AI Subtask Generation - JSON Parse Error:', jsonError.message);
+      console.error('Raw AI Response:', text);
+      throw new Error('AI response was not valid JSON.');
+    }
+    // --- END OF FIX ---
+
+  } catch (error) {
+    console.error('Error generating AI sub-tasks:', error);
+    throw new Error('Failed to generate AI sub-tasks.');
+  }
+};

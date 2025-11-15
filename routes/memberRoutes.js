@@ -4,7 +4,8 @@ const {
   getAllMembers,
   getMemberDetails,
   updateMemberProfile,
-  sendMemberReport
+  sendMemberReport,
+  generateTalkingPoints
 } = require('../controllers/memberController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -22,5 +23,8 @@ router.route('/details')
 
 router.route('/send-report')
   .post(sendMemberReport);
+
+router.route('/talking-points')
+  .get(generateTalkingPoints);
 
 module.exports = router;

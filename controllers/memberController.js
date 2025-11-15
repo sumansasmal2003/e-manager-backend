@@ -4,7 +4,9 @@ const Meeting = require('../models/Meeting');
 const Activity = require('../models/Activity');
 const MemberProfile = require('../models/MemberProfile');
 const Attendance = require('../models/Attendance');
-const { generateMemberPDFReport } = require('../services/memberReportService'); // <-- 2. IMPORT
+const { generatePDFFromMarkdown } = require('../services/memberReportService');
+const { generateAITalkingPoints } = require('../services/reportService');
+const { generateAIMemberReport } = require('../services/reportService');
 const { sendMemberReportEmail } = require('../services/emailService');
 
 // @desc    Get all unique members for the leader with their teams
@@ -163,38 +165,97 @@ exports.sendMemberReport = async (req, res) => {
     const teams = await Team.find({ owner: leaderId }).select('_id');
     const teamIds = teams.map(t => t._id);
 
-    // --- 3. DEFINE DATE RANGE (THE FIX) ---
+    // 3. DEFINE DATE RANGE (remains the same)
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - 30); // 30 days ago
 
-    // 4. Fetch all data for this member in parallel *with date range*
+    // 4. Fetch all data for this member (remains the same)
     const [tasks, attendance] = await Promise.all([
       Task.find({
         team: { $in: teamIds },
         assignedTo: memberName,
         $or: [
-          { status: { $in: ['Pending', 'In Progress'] } }, // All active tasks
-          { updatedAt: { $gte: startDate, $lte: endDate }, status: 'Completed' } // Or tasks completed in the period
+          { status: { $in: ['Pending', 'In Progress'] } },
+          { updatedAt: { $gte: startDate, $lte: endDate }, status: 'Completed' }
         ]
       }),
       Attendance.find({
         leader: leaderId,
         member: memberName,
-        date: { $gte: startDate, $lte: endDate } // <-- FIX: Only get attendance for the last 30 days
+        date: { $gte: startDate, $lte: endDate }
       }),
     ]);
 
-    // 5. Generate the PDF (pass the date range for context)
-    const pdfBuffer = await generateMemberPDFReport(profile, tasks, attendance, startDate, endDate);
+    // --- 5. THIS IS THE NEW LOGIC ---
+    // 5a. Generate the report summary text using AI
+    const markdownReport = await generateAIMemberReport(
+      profile,
+      tasks,
+      attendance,
+      startDate,
+      endDate
+    );
 
-    // 6. Send the email
+    // 5b. Convert that markdown text into a PDF buffer
+    const pdfBuffer = await generatePDFFromMarkdown(markdownReport, profile.name);
+    // --- END OF NEW LOGIC ---
+
+    // 6. Send the email (remains the same)
     await sendMemberReportEmail(profile.email, profile.name, pdfBuffer, leaderId);
 
-    res.json({ message: `Report successfully sent to ${profile.email}.` });
+    res.json({ message: `AI-powered report successfully sent to ${profile.email}.` });
 
   } catch (error) {
     console.error('Send Member Report Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
+/**
+ * @desc    Generate AI talking points for a 1-on-1
+ * @route   GET /api/members/talking-points?name=...
+ */
+exports.generateTalkingPoints = async (req, res) => {
+  const { name } = req.query;
+  if (!name) {
+    return res.status(400).json({ message: 'Member name is required' });
+  }
+
+  try {
+    const userTeams = await Team.find({ owner: req.user.id }).select('_id');
+    const teamIds = userTeams.map(team => team._id);
+
+    // 1. Fetch the same data as getMemberDetails
+    const [tasks, activities, profile] = await Promise.all([
+      Task.find({
+        team: { $in: teamIds },
+        assignedTo: name
+      }).sort({ dueDate: 1 }),
+
+      Activity.find({
+        team: { $in: teamIds },
+        details: { $regex: new RegExp(name, 'i') }
+      }).populate('user', 'username').sort({ createdAt: -1 }).limit(30),
+
+      MemberProfile.findOne({
+        leader: req.user.id,
+        name: name
+      })
+    ]);
+
+    if (!profile) {
+      return res.status(404).json({ message: 'Member profile not found.' });
+    }
+
+    // 2. Call the new AI service
+    const talkingPoints = await generateAITalkingPoints(profile, tasks, activities);
+
+    // 3. Send the result back
+    res.json({ talkingPoints });
+
+  } catch (error) {
+    console.error('Error in generateTalkingPoints:', error.message);
+    res.status(500).json({ message: 'Server Error' });
   }
 };

@@ -14,3 +14,18 @@ exports.getActivityForTeam = async (req, res) => {
     res.status(500).json({ message: 'Server Error' });
   }
 };
+
+// @desc    Get ALL activity for a team
+// @route   GET /api/activity/:teamId/all
+exports.getAllActivityForTeam = async (req, res) => {
+  try {
+    const activities = await Activity.find({ team: req.params.teamId })
+      .sort({ createdAt: -1 }) // Newest first
+      // No .limit() - get all
+      .populate('user', 'username'); // Show who performed the action
+
+    res.json(activities);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
