@@ -21,7 +21,14 @@ exports.getUserProfile = async (req, res) => {
       username: user.username,
       email: user.email,
       connecteamAccounts: user.connecteamAccounts, // <-- Must be this
-      googleCalendarConnected: user.googleCalendarConnected // <-- Must be included
+      googleCalendarConnected: user.googleCalendarConnected, // <-- Must be included
+      companyName: user.companyName,
+      companyAddress: user.companyAddress,
+      companyWebsite: user.companyWebsite,
+      ceoName: user.ceoName,
+      hrName: user.hrName,
+      hrEmail: user.hrEmail,
+      createdAt: updatedUser.createdAt
     });
   } else {
     res.status(404).json({ message: 'User not found' });
@@ -78,11 +85,16 @@ exports.deleteConnecteamAccount = async (req, res) => {
   }
 };
 
-// --- ADD THIS NEW FUNCTION ---
-// @desc    Update user profile (username & email)
+// @desc    Update user profile (username, email, & company info)
 // @route   PUT /api/user/profile
 exports.updateUserProfile = async (req, res) => {
-  const { username, email } = req.body;
+  // 1. Destructure all fields from the body
+  const {
+    username, email,
+    companyName, companyAddress, companyWebsite,
+    ceoName, hrName, hrEmail
+  } = req.body;
+
   try {
     const user = await User.findById(req.user.id);
     if (!user) {
@@ -105,19 +117,40 @@ exports.updateUserProfile = async (req, res) => {
         }
     }
 
+    // 2. Update all fields
     user.username = username || user.username;
     user.email = email || user.email;
 
+    // Use nullish coalescing (??) to allow setting fields to an empty string ""
+    user.companyName = companyName ?? user.companyName;
+    user.companyAddress = companyAddress ?? user.companyAddress;
+    user.companyWebsite = companyWebsite ?? user.companyWebsite;
+    user.ceoName = ceoName ?? user.ceoName;
+    user.hrName = hrName ?? user.hrName;
+    user.hrEmail = hrEmail ?? user.hrEmail;
+
     const updatedUser = await user.save();
 
-    // Send back new user data (to update context)
+    // 3. Send back all fields that the AuthContext uses
     res.json({
       _id: updatedUser._id,
       username: updatedUser.username,
       email: updatedUser.email,
-      connecteamAdminLink: updatedUser.connecteamAdminLink,
+      connecteamAccounts: updatedUser.connecteamAccounts,
+      googleCalendarConnected: updatedUser.googleCalendarConnected,
+      companyName: updatedUser.companyName,
+      companyAddress: updatedUser.companyAddress,
+      companyWebsite: updatedUser.companyWebsite,
+      ceoName: updatedUser.ceoName,
+      hrName: updatedUser.hrName,
+      hrEmail: updatedUser.hrEmail,
+      createdAt: user.createdAt
     });
   } catch (error) {
+    // Handle potential validation errors (e.g., bad HR email)
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };

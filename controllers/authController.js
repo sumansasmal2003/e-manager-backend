@@ -36,7 +36,14 @@ exports.registerUser = async (req, res) => {
         email: user.email,
         token: generateToken(user._id),
         connecteamAccounts: user.connecteamAccounts || [],
-        googleCalendarConnected: user.googleCalendarConnected
+        googleCalendarConnected: user.googleCalendarConnected,
+        companyName: user.companyName,
+        companyAddress: user.companyAddress,
+        companyWebsite: user.companyWebsite,
+        ceoName: user.ceoName,
+        hrName: user.hrName,
+        hrEmail: user.hrEmail,
+        createdAt: user.createdAt
       });
 
       // We will add the nodemailer welcome email here later!
@@ -74,7 +81,14 @@ exports.loginUser = async (req, res) => {
         email: user.email,
         token: generateToken(user._id),
         connecteamAccounts: user.connecteamAccounts,
-        googleCalendarConnected: user.googleCalendarConnected // <-- This will now have the value
+        googleCalendarConnected: user.googleCalendarConnected, // <-- This will now have the value
+        companyName: user.companyName,
+        companyAddress: user.companyAddress,
+        companyWebsite: user.companyWebsite,
+        ceoName: user.ceoName,
+        hrName: user.hrName,
+        hrEmail: user.hrEmail,
+        createdAt: user.createdAt
       });
     } else {
       res.status(401).json({ message: 'Invalid email or password' });

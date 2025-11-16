@@ -41,8 +41,8 @@ exports.googleAuthCallback = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) {
       // This should not happen if the flow started correctly
-      return res.redirect('https://emanagerpro.vercel.app/settings?google=error');
-      // return res.redirect('http://localhost:5173/settings?google=error');
+      // return res.redirect('https://emanagerpro.vercel.app/settings?google=error');
+      return res.redirect('http://localhost:5173/settings?google=error');
     }
 
     user.googleAccessToken = access_token;
@@ -54,8 +54,8 @@ exports.googleAuthCallback = async (req, res) => {
     await user.save();
 
     // 3. Redirect back to the frontend settings page
-    res.redirect('https://emanagerpro.vercel.app/settings?google=success');
-    // res.redirect('http://localhost:5173/settings?google=success');
+    // res.redirect('https://emanagerpro.vercel.app/settings?google=success');
+    res.redirect('http://localhost:5173/settings?google=success');
 
   } catch (error) {
     console.error('Google Auth Callback Error:', error);

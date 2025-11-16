@@ -36,6 +36,45 @@ const userSchema = new mongoose.Schema({
     minlength: 6,
     select: false, // Don't send password in responses by default
   },
+
+  // --- ADDED COMPANY FIELDS ---
+  companyName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  companyAddress: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  companyWebsite: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  ceoName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  hrName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  hrEmail: {
+    type: String,
+    trim: true,
+    default: '',
+    // Optional validation
+    match: [
+      /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
+      'Please fill a valid email address',
+    ],
+  },
+  // --- END ADDED FIELDS ---
+
   connecteamAccounts: [connecteamAccountSchema],
   passwordResetOTP: {
     type: String,

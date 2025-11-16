@@ -439,3 +439,72 @@ Each object in the array must have two keys: "title" (string) and "description" 
     throw new Error('Failed to generate AI sub-tasks.');
   }
 };
+
+/**
+ * Generates a contextual chat response using Gemini AI.
+ * @param {Array} history - The chat history (e.g., [{role: 'user', content: '...'}])
+ * @param {string} question - The user's new question.
+ * @param {string} context - The massive string of all user data.
+ * @returns {string} The AI-generated text response.
+ */
+exports.generateChatResponse = async (history, question, context) => {
+  // Use the 'gemini-2.0-flash' model for fast, conversational responses
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  // 1. --- FIX: Correct System Instruction Format ---
+  // The content must be wrapped in a `parts` array.
+  const systemInstruction = {
+    role: 'user',
+    parts: [{
+      text: `
+You are E-Manager AI, a helpful and professional assistant.
+Your task is to answer the user's questions based *ONLY* on the data provided in the "USER'S ACCOUNT DATA" section.
+You must strictly follow these rules:
+
+1.  **Use Only Provided Data:** Do not use any external knowledge. All your answers must come directly from the "USER'S ACCOUNT DATA" context.
+2.  **Be Data-Aware:** You have access to all the user's teams, tasks, members, notes, meetings, and attendance records.
+3.  **Be Conversational:** Answer in a helpful, clear, and professional tone.
+4.  **Handle Missing Information:** If the user asks for information that is not in the provided data (e.g., "What's the weather?" or "Who is Suman's manager?"), you MUST respond with: "I'm sorry, I don't have that information in my records." or "I can only answer questions about your E-Manager account data."
+5.  **Be Concise:** Keep your answers as short and direct as possible while still being helpful.
+6.  **Perform Calculations:** You can count items (e.g., "How many tasks are pending?"), list items (e.g., "What are Suman's tasks?"), and summarize data.
+
+Here is the full context of the user's account:
+
+--- START OF USER'S ACCOUNT DATA ---
+${context}
+--- END OF USER'S ACCOUNT DATA ---
+    `,
+    }],
+  };
+
+  // 2. --- FIX: Correct History Mapping ---
+  // We must map the frontend's history format to the SDK's required format.
+  // - Map `role: 'ai'` to `role: 'model'`
+  // - Map `content: '...'` to `parts: [{ text: '...' }]`
+  const formattedHistory = history.map(msg => ({
+    role: msg.role === 'ai' ? 'model' : 'user', // Map 'ai' to 'model'
+    parts: [{ text: msg.content }],
+  }));
+
+  // 3. Start the chat with the fully formatted history
+  const chat = model.startChat({
+    history: [systemInstruction, ...formattedHistory],
+  });
+
+  try {
+    // 4. Send the user's new question (as a plain string, which is correct)
+    const result = await chat.sendMessage(question);
+    const response = await result.response;
+    const text = response.text();
+    return text;
+
+  } catch (error) {
+    console.error('Error in generateChatResponse:', error);
+    // Handle potential safety blocks or other AI errors
+    if (error.response && error.response.promptFeedback) {
+      console.error('AI Prompt Feedback:', error.response.promptFeedback);
+      return "I'm sorry, I couldn't process that request due to a content filter. Please try rephrasing.";
+    }
+    throw new Error('Failed to get a response from the AI.');
+  }
+};
