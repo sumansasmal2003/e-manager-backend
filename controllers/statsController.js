@@ -4,6 +4,7 @@ const Note = require('../models/Note');
 const Meeting = require('../models/Meeting');
 const { logActivity } = require('../services/activityService');
 const { generateAIDailyBriefing } = require('../services/reportService');
+const { logAiAction } = require('../services/aiLogService');
 
 const fetchActionItemsData = async (userId) => {
   // 1. Get user's team IDs
@@ -259,6 +260,8 @@ exports.getAIDailyBriefing = async (req, res) => {
 
     // 3. Call the AI service
     const briefing = await generateAIDailyBriefing(username, actionItems);
+
+    logAiAction(req.user.id, 'AI_DAILY_BRIEFING');
 
     // 4. Send the briefing back
     res.json({ briefing });

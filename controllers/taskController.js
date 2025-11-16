@@ -3,6 +3,7 @@ const Team = require('../models/Team');
 const TeamNote = require('../models/TeamNote');
 const { logActivity } = require('../services/activityService');
 const { generateAISubtasks } = require('../services/reportService');
+const { logAiAction } = require('../services/aiLogService');
 
 // We re-use this check from teamController, but we need to fetch the team
 const checkTeamMembership = async (req, res, next) => {
@@ -194,6 +195,7 @@ exports.generateSubtasks = async (req, res) => {
 
   try {
     const subtasks = await generateAISubtasks(taskTitle);
+    logAiAction(req.user.id, 'AI_GENERATE_SUBTASKS');
     res.json(subtasks);
   } catch (error) {
     console.error('Generate Subtasks Error:', error.message);

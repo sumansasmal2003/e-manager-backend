@@ -8,6 +8,7 @@ const { generatePDFFromMarkdown } = require('../services/memberReportService');
 const { generateAITalkingPoints } = require('../services/reportService');
 const { generateAIMemberReport } = require('../services/reportService');
 const { sendMemberReportEmail } = require('../services/emailService');
+const { logAiAction } = require('../services/aiLogService');
 
 // @desc    Get all unique members for the leader with their teams
 // @route   GET /api/members
@@ -204,6 +205,8 @@ exports.sendMemberReport = async (req, res) => {
     // 6. Send the email (remains the same)
     await sendMemberReportEmail(profile.email, profile.name, pdfBuffer, leaderId);
 
+    logAiAction(req.user.id, 'AI_MEMBER_REPORT');
+
     res.json({ message: `AI-powered report successfully sent to ${profile.email}.` });
 
   } catch (error) {
@@ -251,6 +254,7 @@ exports.generateTalkingPoints = async (req, res) => {
     // 2. Call the new AI service
     const talkingPoints = await generateAITalkingPoints(profile, tasks, activities);
 
+    logAiAction(req.user.id, 'AI_TALKING_POINTS');
     // 3. Send the result back
     res.json({ talkingPoints });
 

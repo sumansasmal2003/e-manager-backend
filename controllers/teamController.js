@@ -6,6 +6,7 @@ const TeamNote = require('../models/TeamNote');
 const Activity = require('../models/Activity');
 const { logActivity } = require('../services/activityService');
 const { generateAIReport } = require('../services/reportService');
+const { logAiAction } = require('../services/aiLogService');
 
 // @desc    Create a new team
 // @route   POST /api/teams
@@ -475,7 +476,7 @@ exports.generateTeamReport = async (req, res) => {
 
     // 3. Call the AI Service with the new data structure
     const reportText = await generateAIReport(leaderName, team, startDate, endDate, processedData);
-
+    logAiAction(req.user.id, 'AI_TEAM_REPORT');
     res.json({ report: reportText });
 
   } catch (error) {

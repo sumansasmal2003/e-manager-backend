@@ -16,6 +16,7 @@ const teamNoteRoutes = require('./routes/teamNoteRoutes');
 const activityRoutes = require('./routes/activityRoutes');
 const oneOnOneRoutes = require('./routes/oneOnOneRoutes');
 const aiChatRoutes = require('./routes/aiChatRoutes');
+const aiUsageRoutes = require('./routes/aiUsageRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -52,6 +53,7 @@ app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/auth/google', require('./routes/googleAuthRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/chat', aiChatRoutes);
+app.use('/api/ai-usage', aiUsageRoutes);
 
 const PORT = process.env.PORT || 5000;
 

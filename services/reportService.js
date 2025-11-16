@@ -441,18 +441,16 @@ Each object in the array must have two keys: "title" (string) and "description" 
 };
 
 /**
+ * AI Call 2: The "Talker"
  * Generates a contextual chat response using Gemini AI.
- * @param {Array} history - The chat history (e.g., [{role: 'user', content: '...'}])
- * @param {string} question - The user's new question.
- * @param {string} context - The massive string of all user data.
- * @returns {string} The AI-generated text response.
+ * This is *only* called if the intent is "GET_ANSWER".
  */
 exports.generateChatResponse = async (history, question, context) => {
-  // Use the 'gemini-2.0-flash' model for fast, conversational responses
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-  // 1. --- FIX: Correct System Instruction Format ---
-  // The content must be wrapped in a `parts` array.
+  // 1. --- MODIFIED SYSTEM INSTRUCTION ---
+  // This prompt is now *simpler*. It no longer needs rules for
+  // handling sensitive data because it's only a "reader".
   const systemInstruction = {
     role: 'user',
     parts: [{
@@ -461,12 +459,11 @@ You are E-Manager AI, a helpful and professional assistant.
 Your task is to answer the user's questions based *ONLY* on the data provided in the "USER'S ACCOUNT DATA" section.
 You must strictly follow these rules:
 
-1.  **Use Only Provided Data:** Do not use any external knowledge. All your answers must come directly from the "USER'S ACCOUNT DATA" context.
+1.  **Use Only Provided Data:** Do not use any external knowledge. All your answers must come from the "USER'S ACCOUNT DATA" context.
 2.  **Be Data-Aware:** You have access to all the user's teams, tasks, members, notes, meetings, and attendance records.
-3.  **Be Conversational:** Answer in a helpful, clear, and professional tone.
-4.  **Handle Missing Information:** If the user asks for information that is not in the provided data (e.g., "What's the weather?" or "Who is Suman's manager?"), you MUST respond with: "I'm sorry, I don't have that information in my records." or "I can only answer questions about your E-Manager account data."
-5.  **Be Concise:** Keep your answers as short and direct as possible while still being helpful.
-6.  **Perform Calculations:** You can count items (e.g., "How many tasks are pending?"), list items (e.g., "What are Suman's tasks?"), and summarize data.
+3.  **This is Read-Only:** Your *only* job is to answer questions. You cannot create, update, or delete anything. If a user asks you to create something (e.g., "make a new task"), you must respond with: "I'm sorry, I can't perform that action."
+4.  **Handle Missing Information:** If the user asks for information that is not in the provided data (e.g., "What's the weather?"), respond with: "I'm sorry, I don't have that information in my records."
+5.  **Be Concise:** Keep your answers short and direct.
 
 Here is the full context of the user's account:
 
@@ -477,22 +474,17 @@ ${context}
     }],
   };
 
-  // 2. --- FIX: Correct History Mapping ---
-  // We must map the frontend's history format to the SDK's required format.
-  // - Map `role: 'ai'` to `role: 'model'`
-  // - Map `content: '...'` to `parts: [{ text: '...' }]`
+  // 2. --- (This part is the same as your previous fix) ---
   const formattedHistory = history.map(msg => ({
-    role: msg.role === 'ai' ? 'model' : 'user', // Map 'ai' to 'model'
+    role: msg.role === 'ai' ? 'model' : 'user',
     parts: [{ text: msg.content }],
   }));
 
-  // 3. Start the chat with the fully formatted history
   const chat = model.startChat({
     history: [systemInstruction, ...formattedHistory],
   });
 
   try {
-    // 4. Send the user's new question (as a plain string, which is correct)
     const result = await chat.sendMessage(question);
     const response = await result.response;
     const text = response.text();
@@ -500,11 +492,145 @@ ${context}
 
   } catch (error) {
     console.error('Error in generateChatResponse:', error);
-    // Handle potential safety blocks or other AI errors
     if (error.response && error.response.promptFeedback) {
       console.error('AI Prompt Feedback:', error.response.promptFeedback);
       return "I'm sorry, I couldn't process that request due to a content filter. Please try rephrasing.";
     }
     throw new Error('Failed to get a response from the AI.');
+  }
+};
+
+/**
+ * AI Call 1: The "Router" or "Agent"
+ * This function determines if the user wants to READ data or WRITE data.
+ * It returns a JSON object describing the user's intent.
+ */
+exports.determineUserIntent = async (question, context, history, timezone) => { // <-- 1. ADD TIMEZONE
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  // Convert chat history to a simple string
+  const historyString = history.map(h => `${h.role}: ${h.content}`).join('\n');
+
+  const prompt = `
+You are a highly intelligent routing agent. Your job is to analyze a user's request, chat history, and data context.
+You must determine which "tool" to use and respond ONLY with a valid JSON object.
+
+--- TIME & DATE CONTEXT ---
+* Today's Date (User's Timezone): ${new Date().toLocaleDateString('en-CA')}
+* User's Local Timezone: ${timezone}
+
+--- CRITICAL TIME INSTRUCTIONS ---
+When you must provide a "dueDate" or "meetingTime":
+1.  Calculate the user's *local* date/time based on their request (e.g., "tomorrow at 5 PM").
+2.  You MUST convert this local date/time into a full UTC ISO 8601 string (e.g., if the user is in "America/New_York" (UTC-4) and asks for 5 PM, the ISO string would end in T21:00:00.000Z).
+3.  Use "Today's Date" and "User's Local Timezone" as your reference point for all calculations.
+
+--- TOOL DEFINITIONS ---
+
+1.  **GET_ANSWER**:
+    * Description: Use this for general questions, summaries, or any request that does *not* create, update, or delete an item.
+    * JSON: {"action": "GET_ANSWER", "payload": {"question": "The user's original question"}}
+
+2.  **CREATE_TASK**:
+    * Description: Use this to create a new task.
+    * Parameters:
+        * "teamName" (string, required): The name of the team.
+        * "assignedTo" (string, required): The name of the member.
+        * "title" (string, required): The title of the task.
+        * "description" (string, optional): A longer description.
+        * "dueDate" (string, optional): The *full UTC ISO 8601 string* for the due date (e.g., "2025-11-21T04:59:59.000Z" for end of day Nov 20th).
+    * JSON: {"action": "CREATE_TASK", "payload": {"teamName": "...", "assignedTo": "...", "title": "...", "dueDate": "..."}}
+
+3.  **SCHEDULE_MEETING**:
+    * Description: Use this to schedule a new meeting.
+    * Parameters:
+        * "teamName" (string, required): The name of the team.
+        * "title" (string, required): The title of the meeting.
+        * "agenda" (string, optional): The meeting agenda.
+        * "meetingTime" (string, required): The *full UTC ISO 8601 string* for the meeting (e.g., "2025-11-20T21:30:00.000Z").
+    * JSON: {"action": "SCHEDULE_MEETING", "payload": {"teamName": "...", "title": "...", "meetingTime": "..."}}
+
+4.  **ADD_NOTE**:
+    * Description: Use this to create a new *personal* note.
+    * JSON: {"action": "ADD_NOTE", "payload": {"title": "...", "content": "..."}}
+
+**UPDATE_TASKS**:
+    * Description: Use this to modify *one or more* existing tasks that match a set of filters.
+    * Parameters:
+        * "find" (object, required): An object of filters to identify the tasks.
+            * "teamName" (string, optional): The name of the team.
+            * "assignedTo" (string, optional): The member the task is assigned to.
+            * "title" (string, optional): A specific task title (or partial title).
+            * "status" (string, optional): The *current* status to filter by (e.g., "Pending").
+            * "dueDate" (string, optional): A *date* ("YYYY-MM-DD") to filter by.
+        * "updates" (object, required): An object containing the fields to change.
+            * "status" (string, optional, enum: ["Pending", "In Progress", "Completed"])
+            * "assignedTo" (string, optional): The *new* member to assign the task(s) to.
+            * "dueDate" (string, optional): The *new* due date ("YYYY-MM-DD" or full ISO string).
+    * JSON: {"action": "UPDATE_TASKS", "payload": {"find": {"teamName": "fixspire", "status": "Pending", "dueDate": "2025-11-15"}, "updates": {"status": "Completed"}}}
+
+**DELETE_TASKS**:
+    * Description: Use this to delete *one or more* tasks that match a set of filters.
+    * Parameters:
+        * "find" (object, required): An object of filters to identify the tasks to delete.
+            * "teamName" (string, optional): The name of the team.
+            * "assignedTo" (string, optional): The member the task is assigned to.
+            * "title" (string, optional): A specific task title (or partial title).
+            * "status" (string, optional): The status to filter by.
+            * "dueDate" (string, optional): A date ("YYYY-MM-DD") to filter by.
+    * JSON: {"action": "DELETE_TASKS", "payload": {"find": {"title": "Old reports", "status": "Completed"}}}
+
+7.  **UPDATE_NOTE**:
+    * Description: Use this to modify an existing *personal* note.
+    * JSON: {"action": "UPDATE_NOTE", "payload": {"find": {"title": "..."}, "updates": {"content": "..."}}}
+
+8.  **DELETE_NOTE**:
+    * Description: Use this to delete a *personal* note.
+    * JSON: {"action": "DELETE_NOTE", "payload": {"find": {"title": "..."}}}
+
+9. **UPDATE_MEETING**:
+    * Description: Use this to modify an existing meeting (e.g., change its time, agenda, or participants).
+    * Parameters:
+        * "find" (object, required): An object to identify the meeting.
+            * "title" (string, required): The title (or partial title) of the meeting to find.
+        * "updates" (object, required): An object containing the fields to change.
+            * "title" (string, optional): New title.
+            * "agenda" (string, optional): New agenda.
+            * "meetingTime" (string, optional): The *new full UTC ISO 8601 string* for the meeting.
+            * "participants" (array[string], optional): New list of participants.
+    * JSON: {"action": "UPDATE_MEETING", "payload": {"find": {"title": "Team Sync"}, "updates": {"agenda": "New agenda item"}}}
+
+10. **DELETE_MEETING**:
+    * Description: Use this to delete or cancel an existing meeting.
+    * Parameters:
+        * "find" (object, required): An object to identify the meeting.
+            * "title" (string, required): The title (or partial title) of the meeting to find.
+            * "teamName" (string, optional): The name of the team (for disambiguation).
+            * "meetingTime" (string, optional): The *full UTC ISO 8601 string* for the meeting time (for disambiguation).
+    * JSON: {"action": "DELETE_MEETING", "payload": {"find": {"title": "Fixspire Working Progress", "teamName": "fixspire", "meetingTime": "2025-11-17T05:30:00.000Z"}}}
+
+--- DATA CONTEXT ---
+${context}
+
+--- CHAT HISTORY ---
+${historyString}
+
+--- NEW USER QUESTION ---
+"${question}"
+
+Respond ONLY with the single, valid JSON object for the action.
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    // Clean the response to ensure it's valid JSON
+    let text = response.text();
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return text;
+  } catch (error) {
+    console.error("Error in determineUserIntent:", error);
+    // Fallback to GET_ANSWER if intent recognition fails
+    return JSON.stringify({ action: "GET_ANSWER", payload: { question: question } });
   }
 };

@@ -26,36 +26,22 @@ const getZoomAccessToken = async () => {
   }
 };
 
-// @desc    Generate a Zoom meeting link
-// @route   POST /api/meetings/generate-zoom
-exports.generateZoomMeeting = async (req, res) => {
-  const { title, meetingTime, timezone } = req.body;
-
+// --- 2. NEW REUSABLE FUNCTION (EXPORTED) ---
+// This is the new function our AI controller will call.
+exports.createZoomLink = async (title, meetingTimeISO, timezone) => {
   try {
     const accessToken = await getZoomAccessToken();
     const zoomApiUrl = 'https://api.zoom.us/v2/users/me/meetings';
 
-    let formattedStartTime;
-    try {
-      const dateObj = new Date(meetingTime);
-
-      // 1. .toISOString() gives "2025-11-14T09:00:00.000Z"
-      // 2. We split at the decimal point to remove milliseconds.
-      // 3. We add the "Z" back to signify UTC.
-      formattedStartTime = dateObj.toISOString().split('.')[0] + "Z";
-      // The result is "2025-11-14T09:00:00Z", which Zoom accepts.
-
-    } catch (e) {
-      return res.status(400).json({ message: 'Invalid meetingTime format. Expected ISO string.' });
-    }
+    // Format the UTC ISO string for Zoom
+    const formattedStartTime = meetingTimeISO.split('.')[0] + "Z";
 
     const meetingDetails = {
       topic: title || 'New E-Manager Meeting',
       type: 2, // Scheduled meeting
-      start_time: formattedStartTime, // <-- Use the new, correctly formatted time
+      start_time: formattedStartTime,
       duration: 60,
-      // By sending an ISO string (ends in "Z"), we must specify UTC.
-      timezone: timezone || 'UTC',
+      timezone: timezone || 'UTC', // Use the user's timezone
       settings: {
         join_before_host: true,
         mute_upon_entry: true,
@@ -69,14 +55,23 @@ exports.generateZoomMeeting = async (req, res) => {
       },
     });
 
-    res.json({
-      join_url: data.join_url,
-    });
+    // Return just the URL
+    return data.join_url;
 
   } catch (error) {
-    // This will now catch any errors if the date string is malformed
     console.error('Error creating Zoom meeting:', error.response ? error.response.data : error.message);
-    res.status(500).json({ message: 'Failed to create Zoom meeting. Invalid date format.' });
+    throw new Error('Failed to create Zoom meeting. Invalid date format or credentials.');
+  }
+};
+
+exports.generateZoomMeeting = async (req, res) => {
+  const { title, meetingTime, timezone } = req.body;
+
+  try {
+    const join_url = await exports.createZoomLink(title, meetingTime, timezone);
+    res.json({ join_url });
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to create Zoom meeting.' });
   }
 };
 
