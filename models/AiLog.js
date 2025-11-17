@@ -24,6 +24,9 @@ const aiLogSchema = new mongoose.Schema(
         'AI_ADD_NOTE',
         'AI_UPDATE_NOTE',
         'AI_DELETE_NOTE',
+        'AI_DRAFT_EMAIL',
+        'AI_PROACTIVE_INSIGHT',
+        'AI_TASK_ESTIMATE',
 
         // Other AI Features
         'AI_GENERATE_SUBTASKS',

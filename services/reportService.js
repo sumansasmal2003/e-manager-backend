@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Task = require('../models/Task');
 
 // Initialize the AI client
 const genAI = new GoogleGenerativeAI('AIzaSyDxz4v-T1_GCUxgxYMSSKDm1nkKzIGJdNU');
@@ -641,5 +642,202 @@ Respond ONLY with the single, valid JSON object for the action.
     console.error("Error in determineUserIntent:", error);
     // Fallback to GET_ANSWER if intent recognition fails
     return JSON.stringify({ action: "GET_ANSWER", payload: { question: question } });
+  }
+};
+
+/**
+ * Generates a professional email draft based on a prompt and user data.
+ * @param {string} userPrompt - The user's goal (e.g., "Draft a warning for Suman about 3 overdue tasks").
+ * @param {string} dataContext - The user's data (tasks, members, etc.).
+ * @param {string} senderName - The user's (leader's) name.
+ * @returns {Promise<{subject: string, body: string}>} - A JSON object with subject and HTML body.
+ */
+exports.generateEmailDraft = async (userPrompt, dataContext, senderName) => {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  const prompt = `
+You are an expert HR manager and team leader. Your task is to draft a professional, clear, and context-aware email.
+The user's goal is: "${userPrompt}".
+The user's name (the sender) is: ${senderName}.
+Use the provided "DATA CONTEXT" to get all names, task titles, and dates you need.
+
+--- DATA CONTEXT ---
+${dataContext}
+--- END DATA CONTEXT ---
+
+Your response MUST be a single, minified JSON object in this exact format:
+{"subject": "A clear, professional subject line", "body": "The full email body, formatted as simple HTML using <p> and <ul> tags."}
+
+Rules:
+1.  **Be Professional:** The tone should match the user's prompt (e.g., "warning," "congratulations," "update").
+2.  **Use Context:** You MUST use the specific task titles, member names, and dates from the data context.
+3.  **Use HTML:** The "body" MUST be valid, simple HTML. Use <p> for paragraphs and <ul>/<li> for lists.
+4.  **Sign Off:** End the email with the sender's name (e.g., "Best,\n${senderName}").
+5.  **Be Specific:** Do not be vague. If the prompt is "warn Suman about 3 overdue tasks," the email should list those 3 tasks.
+6.  **JSON Only:** Do not include any text before or after the JSON object.
+
+Draft the email now.
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text();
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    // Parse to ensure it's valid JSON before returning
+    const emailData = JSON.parse(text);
+    return emailData;
+
+  } catch (error) {
+    console.error("Error in generateEmailDraft:", error);
+    throw new Error("Failed to generate AI email draft. The AI returned an invalid response.");
+  }
+};
+
+
+/**
+ * Generates proactive insights, warnings, and suggestions based on all user data.
+ * @param {string} dataContext - The user's complete data context.
+ * @returns {Promise<string>} - A JSON string *array* of insight objects.
+ */
+exports.generateProactiveInsights = async (dataContext) => {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  const prompt = `
+You are a proactive, senior-level "Manager's Assistant" AI.
+Your *only* job is to analyze the user's complete "DATA CONTEXT" and find potential problems, risks, or positive insights that the user might have missed.
+Today's Date: ${new Date().toLocaleDateString('en-CA')}
+
+--- DATA CONTEXT ---
+${dataContext}
+--- END DATA CONTEXT ---
+
+You must analyze the context and look for these specific patterns:
+1.  **Overdue Tasks:** Are there any tasks that are past their due date but not 'Completed'?
+2.  **At-Risk Tasks:** Are there tasks due in the next 1-2 days that are still 'Pending'?
+3.  **Member Overload:** Is one specific member assigned to a high number of 'In Progress' or 'Overdue' tasks?
+4.  **Meeting Conflicts:** Are there any meetings scheduled for the same time?
+5.  **Meeting Preparedness:** Is there a meeting in the next 24 hours with no agenda?
+6.  **1-on-1 Gaps:** Has it been more than 30 days since the last 1-on-1 with a specific member (check 'ATTENDANCE TOTALS' for member names)?
+7.  **Positive Reinforcement:** Is a member on a long 'Present' streak? Has a team just completed a major task?
+8.  **Attendance Issues:** Does any member have a high number of 'Absent' or 'Leave' days in the 'ATTENDANCE TOTALS' data?
+
+CRITICAL: Your response MUST be a single, valid, minified JSON array of "Insight Objects".
+An "Insight Object" has this format:
+{"type": "Warning" | "Suggestion" | "Insight", "title": "A short, bold headline", "message": "A 1-2 sentence explanation."}
+
+Rules:
+-   If you find no insights, return an empty array: [].
+-   Do not generate more than 5 insights, even if you find more. Pick the 5 most critical ones.
+-   Do not include any text, markdown, or commentary before or after the JSON array.
+
+Analyze the data and return the JSON array of insights now.
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text();
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    // Ensure it's a valid array
+    if (!text.startsWith('[') || !text.endsWith(']')) {
+      console.error("AI Insight Error: Response was not a valid JSON array.", text);
+      return "[]"; // Return empty array on failure
+    }
+
+    // Test parsing
+    JSON.parse(text);
+
+    return text;
+
+  } catch (error) {
+    console.error("Error in generateProactiveInsights:", error);
+    // Return an empty array on any error
+    return "[]";
+  }
+};
+
+/**
+ * AI-Powered Task & Project Forecasting
+ * Generates a time estimate for a new task based on past, similar tasks.
+ * @param {string} taskTitle - The title of the new task to estimate.
+ * @param {string} teamId - The ID of the team to scope the search.
+ * @param {string} timezone - The user's local timezone.
+ * @returns {Promise<object>} - A JSON object with the estimate.
+ */
+exports.generateTaskEstimate = async (taskTitle, teamId, timezone) => {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+  // 1. Fetch all *completed* tasks for this team to build a knowledge base.
+  const completedTasks = await Task.find({
+    team: teamId,
+    status: 'Completed',
+    createdAt: { $exists: true },
+    updatedAt: { $exists: true }
+  }).select('title createdAt updatedAt').lean();
+
+  // 2. Calculate the duration for each completed task
+  const taskKnowledgeBase = completedTasks.map(task => {
+    const start = new Date(task.createdAt);
+    const end = new Date(task.updatedAt);
+    const durationMs = end.getTime() - start.getTime();
+    // Convert duration from milliseconds to days, rounding to one decimal
+    const durationDays = Math.round((durationMs / (1000 * 60 * 60 * 24)) * 10) / 10;
+
+    return { title: task.title, durationDays: durationDays > 0 ? durationDays : 0.5 }; // Min 0.5 days
+  });
+
+  // 3. Create the prompt
+  const prompt = `
+You are an expert Senior Project Manager. Your job is to analyze a new task and provide a time estimate.
+Today's Date: ${new Date().toLocaleDateString('en-CA')}
+User's Timezone: ${timezone}
+
+New Task to Estimate: "${taskTitle}"
+
+Here is a knowledge base of all past completed tasks for this team and their actual duration in days:
+--- KNOWLEDGE BASE ---
+${JSON.stringify(taskKnowledgeBase, null, 2)}
+--- END KNOWLEDGE BASE ---
+
+Your task:
+1.  Analyze the "New Task to Estimate".
+2.  Find 3-5 tasks from the "KNOWLEDGE BASE" that are *semantically similar* (e.g., "Design logo" is similar to "Create branding mockups").
+3.  Calculate the average duration of those similar tasks.
+4.  Round the average to the nearest half-day (e.g., 3, 3.5, 4). This is your "estimateInDays".
+5.  Calculate the "suggestedDate" by adding "estimateInDays" to "Today's Date". Format it as YYYY-MM-DD.
+6.  Write a brief "reasoning" string (1-2 sentences) explaining *which* past tasks you used for the estimate.
+
+Respond ONLY with a single, minified JSON object in this exact format:
+{
+  "estimateInDays": 4.5,
+  "suggestedDate": "YYYY-MM-DD",
+  "reasoning": "Based on similar tasks like 'Task A' (X days) and 'Task B' (Y days)."
+}
+
+If no similar tasks are found, return:
+{
+  "estimateInDays": null,
+  "suggestedDate": null,
+  "reasoning": "I couldn't find any similar completed tasks in your history for this team."
+}
+
+Generate the JSON object now.
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let text = response.text();
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    const estimateData = JSON.parse(text);
+    return estimateData;
+
+  } catch (error) {
+    console.error("Error in generateTaskEstimate:", error);
+    throw new Error("Failed to generate AI task estimate.");
   }
 };

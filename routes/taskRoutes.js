@@ -6,7 +6,8 @@ const {
   checkTeamMembership, // Import the middleware
   createBulkTasks,
   deleteTask,
-  generateSubtasks
+  generateSubtasks,
+  getTaskEstimate
 } = require('../controllers/taskController');
 
 const { protect } = require('../middleware/authMiddleware');
@@ -31,5 +32,7 @@ router.route('/:teamId/bulk')
 router.route('/task/:taskId')
   .put(updateTask) // PUT /api/tasks/task/task-id
   .delete(checkTeamMembership, deleteTask);
+
+router.route('/estimate').post(protect, getTaskEstimate);
 
 module.exports = router;

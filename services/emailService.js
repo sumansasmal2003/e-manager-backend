@@ -12,7 +12,7 @@ const createTransporter = () => {
   });
 };
 
-const sendEmail = async (options, userId, memberName) => {
+exports.sendEmail = async (options, userId, memberName) => {
   const transporter = createTransporter();
 
   const mailOptions = {

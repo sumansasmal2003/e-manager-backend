@@ -2,7 +2,7 @@ const Task = require('../models/Task');
 const Team = require('../models/Team');
 const TeamNote = require('../models/TeamNote');
 const { logActivity } = require('../services/activityService');
-const { generateAISubtasks } = require('../services/reportService');
+const { generateAISubtasks, generateTaskEstimate } = require('../services/reportService');
 const { logAiAction } = require('../services/aiLogService');
 const { logError } = require('../services/logService');
 
@@ -206,6 +206,41 @@ exports.generateSubtasks = async (req, res) => {
     console.error('Generate Subtasks Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
     logError(userId, error, req.originalUrl);
+  }
+};
+
+/**
+ * @desc    Generate an AI-powered time estimate for a new task
+ * @route   POST /api/tasks/estimate
+ */
+exports.getTaskEstimate = async (req, res) => {
+  const { title, teamId } = req.body;
+  const timezone = req.body.timezone || 'UTC'; // Get timezone from body
+
+  if (!title || !teamId) {
+    return res.status(400).json({ message: 'Task title and teamId are required' });
+  }
+
+  try {
+    // 1. Ensure user owns this team (Security Check)
+    const team = await Team.findById(teamId);
+    if (!team || team.owner.toString() !== req.user.id) {
+      return res.status(401).json({ message: 'Not authorized for this team' });
+    }
+
+    // 2. Call the AI service
+    const estimate = await generateTaskEstimate(title, teamId, timezone);
+
+    // 3. Log the AI action
+    logAiAction(req.user.id, 'AI_TASK_ESTIMATE');
+
+    // 4. Return the estimate
+    res.json(estimate);
+
+  } catch (error) {
+    console.error('Get Task Estimate Error:', error.message);
+    logError(req.user.id, error, req.originalUrl);
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
 

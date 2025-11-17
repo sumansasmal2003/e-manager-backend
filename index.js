@@ -18,6 +18,8 @@ const oneOnOneRoutes = require('./routes/oneOnOneRoutes');
 const aiChatRoutes = require('./routes/aiChatRoutes');
 const aiUsageRoutes = require('./routes/aiUsageRoutes');
 const systemLogRoutes = require('./routes/systemLogRoutes');
+const emailRoutes = require('./routes/emailRoutes');
+const insightRoutes = require('./routes/insightRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -56,6 +58,8 @@ app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/chat', aiChatRoutes);
 app.use('/api/ai-usage', aiUsageRoutes);
 app.use('/api/system-logs', systemLogRoutes);
+app.use('/api/emails', emailRoutes);
+app.use('/api/insights', insightRoutes);
 
 const PORT = process.env.PORT || 5000;
 
