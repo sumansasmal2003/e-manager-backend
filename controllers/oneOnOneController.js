@@ -1,6 +1,7 @@
 // controllers/oneOnOneController.js
 
 const OneOnOne = require('../models/OneOnOne');
+const { logError } = require('../services/logService');
 
 // @desc    Get all 1-on-1s for a specific member
 // @route   GET /api/oneonones/member/:memberName
@@ -14,6 +15,7 @@ exports.getOneOnOnesForMember = async (req, res) => {
     res.json(oneOnOnes);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -38,6 +40,7 @@ exports.createOneOnOne = async (req, res) => {
     res.status(201).json(createdOneOnOne);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -67,6 +70,7 @@ exports.updateOneOnOne = async (req, res) => {
     res.json(updatedOneOnOne);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -87,5 +91,6 @@ exports.deleteOneOnOne = async (req, res) => {
     res.json({ message: '1-on-1 removed successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };

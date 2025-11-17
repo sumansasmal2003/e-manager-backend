@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Attendance = require('../models/Attendance');
 const Team = require('../models/Team');
 const MemberProfile = require('../models/MemberProfile');
+const { logError } = require('../services/logService');
 
 // @desc    Get attendance records for a specific month
 // @route   GET /api/attendance?year=2025&month=10 (0-indexed month)
@@ -25,6 +26,7 @@ exports.getAttendance = async (req, res) => {
     res.json(records);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -61,6 +63,7 @@ exports.setAttendance = async (req, res) => {
     res.status(201).json(record);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -105,6 +108,7 @@ exports.getMembers = async (req, res) => {
   } catch (error) {
     console.error('Error in getMembers:', error.message);
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -148,6 +152,7 @@ exports.getAttendanceSummary = async (req, res) => {
     res.json(summary);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -173,6 +178,7 @@ exports.getAttendanceForDate = async (req, res) => {
     res.json(records);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -293,6 +299,7 @@ exports.exportAttendanceData = async (req, res) => {
   } catch (error) {
     console.error('Export error:', error.message);
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -365,5 +372,6 @@ exports.setBulkHoliday = async (req, res) => {
   } catch (error) {
     console.error('Bulk Holiday Set Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };

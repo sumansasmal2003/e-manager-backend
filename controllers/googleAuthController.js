@@ -1,6 +1,7 @@
 // controllers/googleAuthController.js
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
+const { logError } = require('../services/logService');
 
 const oAuth2Client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -59,6 +60,7 @@ exports.googleAuthCallback = async (req, res) => {
 
   } catch (error) {
     console.error('Google Auth Callback Error:', error);
+    logError(userId, error, req.originalUrl);
     res.redirect('YOUR_FRONTEND_URL/settings?google=error');
   }
 };
@@ -95,6 +97,7 @@ exports.googleDisconnect = async (req, res) => {
     });
   } catch (error) {
     console.error('Google Disconnect Error:', error);
+    logError(userId, error, req.originalUrl);
     res.status(500).json({ message: 'Server error while disconnecting' });
   }
 };

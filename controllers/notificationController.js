@@ -1,4 +1,5 @@
 const EmailLog = require('../models/EmailLog');
+const { logError } = require('../services/logService');
 
 // @desc    Get all email logs for the logged-in user
 // @route   GET /api/notifications
@@ -12,5 +13,6 @@ exports.getEmailLogs = async (req, res) => {
   } catch (error) {
     console.error('Get Email Logs Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };

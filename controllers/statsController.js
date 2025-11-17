@@ -5,6 +5,7 @@ const Meeting = require('../models/Meeting');
 const { logActivity } = require('../services/activityService');
 const { generateAIDailyBriefing } = require('../services/reportService');
 const { logAiAction } = require('../services/aiLogService');
+const { logError } = require('../services/logService');
 
 const fetchActionItemsData = async (userId) => {
   // 1. Get user's team IDs
@@ -228,6 +229,7 @@ exports.getOverviewStats = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -243,6 +245,7 @@ exports.getActionItems = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -269,5 +272,6 @@ exports.getAIDailyBriefing = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };

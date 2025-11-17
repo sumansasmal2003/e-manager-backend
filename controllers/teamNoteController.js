@@ -1,5 +1,6 @@
 const TeamNote = require('../models/TeamNote');
 const Team = require('../models/Team');
+const { logError } = require('../services/logService');
 
 // @desc    Get all notes for a team
 // @route   GET /api/teamnotes/:teamId
@@ -13,6 +14,7 @@ exports.getTeamNotesForTeam = async (req, res) => {
     res.json(notes);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -40,6 +42,7 @@ exports.createTeamNote = async (req, res) => {
     res.status(201).json(populatedNote);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -72,6 +75,7 @@ exports.updateTeamNote = async (req, res) => {
 res.status(201).json(populatedNote);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -96,5 +100,6 @@ await note.deleteOne();
     res.json({ message: 'Team note removed' });
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };

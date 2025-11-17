@@ -7,6 +7,7 @@ const MemberProfile = require('../models/MemberProfile');
 const Attendance = require('../models/Attendance');
 const TeamNote = require('../models/TeamNote');
 const { logAiAction } = require('../services/aiLogService');
+const { logError } = require('../services/logService');
 
 // Import our two AI services: one to decide *what* to do, one to *talk*
 const {
@@ -33,16 +34,44 @@ const gatherAllUserData = async (userId, username, timezone) => {
 
   const teamIds = userTeams.map(t => t._id);
 
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
   const [
     userTasks,
     userMeetings,
     userTeamNotes,
-    userAttendance,
+    recentAttendance,
+    attendanceSummary,
+    allHolidays,
   ] = await Promise.all([
     Task.find({ team: { $in: teamIds } }).lean(),
     Meeting.find({ team: { $in: teamIds } }).lean(),
     TeamNote.find({ team: { $in: teamIds } }).lean(),
-    Attendance.find({ leader: userId }).limit(20).sort({ date: -1 }).lean(),
+    Attendance.find({
+      leader: userId,
+      date: { $gte: thirtyDaysAgo }
+    }).sort({ date: -1 }).lean(),
+
+    // 2. Get all-time aggregate counts, grouped by member and status
+    Attendance.aggregate([
+      { $match: { leader: userId } },
+      { $group: {
+          _id: { member: "$member", status: "$status" },
+          count: { $sum: 1 }
+        }
+      },
+      { $project: {
+          _id: 0,
+          member: "$_id.member",
+          status: "$_id.status",
+          count: "$count"
+        }
+      }
+    ]),
+
+    // 3. Get all holiday records, as users often ask for these
+    Attendance.find({ leader: userId, status: 'Holiday' }).sort({ date: -1 }).lean()
   ]);
 
   // 2. Serialize Data into a Context String
@@ -71,9 +100,27 @@ const gatherAllUserData = async (userId, username, timezone) => {
     dataContext += `- ${profile.name} (Email: ${profile.email || 'N/A'})\n`;
   });
 
-  dataContext += "\n## RECENT ATTENDANCE RECORDS ##\n";
-  userAttendance.forEach(att => {
+  dataContext += "\n## ATTENDANCE TOTALS (All-Time) ##\n";
+  const summaryByMember = attendanceSummary.reduce((acc, item) => {
+    if (!acc[item.member]) acc[item.member] = {};
+    acc[item.member][item.status] = item.count;
+    return acc;
+  }, {});
+  for (const [member, stats] of Object.entries(summaryByMember)) {
+    const statsString = Object.entries(stats).map(([status, count]) => `${status}: ${count}`).join(', ');
+    dataContext += `- ${member}: ${statsString}\n`;
+  }
+
+  // Add the recent 30-day records
+  dataContext += "\n## RECENT ATTENDANCE (Last 30 Days) ##\n";
+  recentAttendance.forEach(att => {
     dataContext += `- ${att.member} was ${att.status} on ${new Date(att.date).toLocaleDateString('en-CA')}\n`;
+  });
+
+  // Add all holidays
+  dataContext += "\n## ALL RECORDED HOLIDAYS ##\n";
+  allHolidays.forEach(att => {
+    dataContext += `- ${att.member} (or all) had a Holiday on ${new Date(att.date).toLocaleDateString('en-CA')}\n`;
   });
 
   dataContext += "\n## PERSONAL NOTES (Titles) ##\n";
@@ -448,6 +495,58 @@ exports.askAiChatbot = async (req, res) => {
         return res.json({ response: `Done. I've deleted the meeting "${meeting.title}".` });
       }
 
+      case 'SET_ATTENDANCE': {
+        const { teamName, members, status } = intent.payload;
+
+        if (!status) {
+          return res.json({ response: "I'm sorry, I need to know what status (Present, Absent, etc.) you'd like to set." });
+        }
+
+        let memberNames = [];
+
+        if (teamName) {
+          const team = userTeams.find(t => t.teamName.toLowerCase() === teamName.toLowerCase());
+          if (!team) {
+            return res.json({ response: `Sorry, I couldn't find a team named "${teamName}".` });
+          }
+          memberNames = team.members;
+        } else if (members && members.length > 0) {
+          // You could add validation here to ensure these members exist
+          memberNames = members;
+        } else {
+          return res.json({ response: "I'm sorry, I need either a team name or a list of members to update attendance." });
+        }
+
+        if (memberNames.length === 0) {
+          return res.json({ response: "I found 0 members to update." });
+        }
+
+        // Get today's date (start of day UTC)
+        const targetDate = new Date();
+        targetDate.setUTCHours(0, 0, 0, 0);
+
+        // Build the bulk update operations
+        const operations = memberNames.map(memberName => ({
+          updateOne: {
+            filter: {
+              leader: userId,
+              member: memberName,
+              date: targetDate,
+            },
+            update: {
+              $set: { status: status },
+            },
+            upsert: true, // Create a record if it doesn't exist
+          },
+        }));
+
+        // Execute the bulk write
+        const result = await Attendance.bulkWrite(operations);
+
+        const count = result.upsertedCount + result.modifiedCount;
+        return res.json({ response: `Done. I've marked ${count} members as "${status}" for today.` });
+      }
+
       // --- ACTION: GET AN ANSWER (Read-Only) ---
       case 'GET_ANSWER':
       default: {
@@ -459,6 +558,7 @@ exports.askAiChatbot = async (req, res) => {
     }
   } catch (error) {
     console.error('AI chat error:', error);
+    logError(userId, error, req.originalUrl);
     // Handle JSON parsing errors or other failures
     if (error.message.includes("JSON")) {
       return res.status(500).json({ message: "The AI returned an invalid response. Please try rephrasing." });

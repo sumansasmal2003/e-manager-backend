@@ -3,6 +3,7 @@ const Task = require('../models/Task');
 const Meeting = require('../models/Meeting');
 const User = require('../models/User'); // <-- IMPORT USER
 const { getGoogleCalendarClient } = require('../services/googleCalendarService');
+const { logError } = require('../services/logService');
 
 // @desc    Get all calendar events (tasks and meetings) for the logged-in user
 // @route   GET /api/calendar
@@ -88,5 +89,6 @@ exports.getCalendarEvents = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };

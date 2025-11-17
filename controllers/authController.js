@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const { sendPasswordResetEmail } = require('../services/emailService');
+const { logError } = require('../services/logService');
 
 // Helper function to create a token
 const generateToken = (id) => {
@@ -53,6 +54,7 @@ exports.registerUser = async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -95,6 +97,7 @@ exports.loginUser = async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -134,6 +137,7 @@ exports.forgotPassword = async (req, res) => {
   } catch (error) {
     console.error('Forgot Password Error:', error.message);
     res.status(500).json({ message: 'Server error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -174,5 +178,6 @@ exports.resetPassword = async (req, res) => {
   } catch (error) {
     console.error('Reset Password Error:', error.message);
     res.status(500).json({ message: 'Server error' });
+    logError(userId, error, req.originalUrl);
   }
 };

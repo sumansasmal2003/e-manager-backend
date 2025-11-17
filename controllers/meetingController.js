@@ -5,6 +5,7 @@ const { logActivity } = require('../services/activityService');
 const Team = require('../models/Team');
 const { getGoogleCalendarClient } = require('../services/googleCalendarService'); // <-- IMPORT HELPER
 const User = require('../models/User');
+const { logError } = require('../services/logService');
 
 // Helper function to get Zoom Access Token
 const getZoomAccessToken = async () => {
@@ -60,6 +61,7 @@ exports.createZoomLink = async (title, meetingTimeISO, timezone) => {
 
   } catch (error) {
     console.error('Error creating Zoom meeting:', error.response ? error.response.data : error.message);
+    logError(userId, error, req.originalUrl);
     throw new Error('Failed to create Zoom meeting. Invalid date format or credentials.');
   }
 };
@@ -72,6 +74,7 @@ exports.generateZoomMeeting = async (req, res) => {
     res.json({ join_url });
   } catch (error) {
     res.status(500).json({ message: error.message || 'Failed to create Zoom meeting.' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -151,6 +154,7 @@ try {
 res.status(201).json(createdMeeting);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -167,6 +171,7 @@ exports.getMeetingsForTeam = async (req, res) => {
     res.json(meetings);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -223,6 +228,7 @@ exports.updateMeeting = async (req, res) => {
     res.json(updatedMeeting);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -260,6 +266,7 @@ exports.deleteMeeting = async (req, res) => {
     res.json({ message: 'Meeting removed successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 

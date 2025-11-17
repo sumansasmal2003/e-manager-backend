@@ -9,6 +9,7 @@ const Attendance = require('../models/Attendance');
 const EmailLog = require('../models/EmailLog');
 const MemberProfile = require('../models/MemberProfile');
 const OneOnOne = require('../models/OneOnOne');
+const { logError } = require('../services/logService');
 
 // @desc    Get logged-in user's profile
 // @route   GET /api/user/profile
@@ -32,6 +33,7 @@ exports.getUserProfile = async (req, res) => {
     });
   } else {
     res.status(404).json({ message: 'User not found' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -56,6 +58,7 @@ exports.addConnecteamAccount = async (req, res) => {
     res.status(201).json(user.connecteamAccounts);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -82,6 +85,7 @@ exports.deleteConnecteamAccount = async (req, res) => {
     res.json(user.connecteamAccounts);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -152,6 +156,7 @@ exports.updateUserProfile = async (req, res) => {
       return res.status(400).json({ message: error.message });
     }
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -185,6 +190,7 @@ exports.changeUserPassword = async (req, res) => {
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -227,5 +233,6 @@ exports.deleteUserAccount = async (req, res) => {
   } catch (error) {
     console.error('Delete User Account Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };

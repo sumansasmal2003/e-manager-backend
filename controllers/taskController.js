@@ -4,6 +4,7 @@ const TeamNote = require('../models/TeamNote');
 const { logActivity } = require('../services/activityService');
 const { generateAISubtasks } = require('../services/reportService');
 const { logAiAction } = require('../services/aiLogService');
+const { logError } = require('../services/logService');
 
 // We re-use this check from teamController, but we need to fetch the team
 const checkTeamMembership = async (req, res, next) => {
@@ -57,6 +58,7 @@ exports.getTasksForTeam = async (req, res) => {
     res.json(tasks);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -94,6 +96,7 @@ exports.updateTask = async (req, res) => {
 res.json(updatedTask);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -153,6 +156,7 @@ res.status(201).json(createdTasks);
 
     // Fallback for other errors
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -179,6 +183,7 @@ await task.deleteOne();
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -200,6 +205,7 @@ exports.generateSubtasks = async (req, res) => {
   } catch (error) {
     console.error('Generate Subtasks Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 

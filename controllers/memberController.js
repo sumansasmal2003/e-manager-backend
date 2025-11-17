@@ -9,6 +9,7 @@ const { generateAITalkingPoints } = require('../services/reportService');
 const { generateAIMemberReport } = require('../services/reportService');
 const { sendMemberReportEmail } = require('../services/emailService');
 const { logAiAction } = require('../services/aiLogService');
+const { logError } = require('../services/logService');
 
 // @desc    Get all unique members for the leader with their teams
 // @route   GET /api/members
@@ -43,6 +44,7 @@ exports.getAllMembers = async (req, res) => {
     res.json(sortedMembers);
   } catch (error) {
     console.error('Error in getAllMembers:', error.message);
+    logError(userId, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error' });
   }
 };
@@ -104,6 +106,7 @@ exports.getMemberDetails = async (req, res) => {
 
   } catch (error) {
     console.error('Error in getMemberDetails:', error.message);
+    logError(userId, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error' });
   }
 };
@@ -136,6 +139,7 @@ exports.updateMemberProfile = async (req, res) => {
     res.json(updatedProfile);
   } catch (error) {
     console.error('Error in updateMemberProfile:', error.message);
+    logError(userId, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error' });
   }
 };
@@ -211,6 +215,7 @@ exports.sendMemberReport = async (req, res) => {
 
   } catch (error) {
     console.error('Send Member Report Error:', error.message);
+    logError(userId, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
@@ -261,5 +266,6 @@ exports.generateTalkingPoints = async (req, res) => {
   } catch (error) {
     console.error('Error in generateTalkingPoints:', error.message);
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };

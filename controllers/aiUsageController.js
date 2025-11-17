@@ -1,6 +1,7 @@
 // controllers/aiUsageController.js
 const AiLog = require('../models/AiLog');
 const mongoose = require('mongoose');
+const { logError } = require('../services/logService');
 
 // @desc    Get all AI usage statistics
 // @route   GET /api/ai-usage/stats
@@ -81,6 +82,7 @@ exports.getUsageStats = async (req, res) => {
 
   } catch (error) {
     console.error('Get AI Stats Error:', error.message);
+    logError(userId, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };

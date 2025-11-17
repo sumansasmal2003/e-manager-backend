@@ -3,6 +3,7 @@ const Task = require('../models/Task');
 const Note = require('../models/Note');
 const TeamNote = require('../models/TeamNote');
 const MemberProfile = require('../models/MemberProfile');
+const { logError } = require('../services/logService');
 
 /**
  * @desc    Perform a global search across all models
@@ -60,5 +61,6 @@ exports.globalSearch = async (req, res) => {
   } catch (error) {
     console.error('Global search error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };

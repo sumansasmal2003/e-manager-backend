@@ -609,6 +609,15 @@ When you must provide a "dueDate" or "meetingTime":
             * "meetingTime" (string, optional): The *full UTC ISO 8601 string* for the meeting time (for disambiguation).
     * JSON: {"action": "DELETE_MEETING", "payload": {"find": {"title": "Fixspire Working Progress", "teamName": "fixspire", "meetingTime": "2025-11-17T05:30:00.000Z"}}}
 
+12. **SET_ATTENDANCE**:
+    * Description: Use this to mark attendance for one or more members for *today's date only*.
+    * Parameters:
+        * "status" (string, required, enum: ["Present", "Absent", "Leave", "Holiday"]): The status to set.
+        * "teamName" (string, optional): The team whose members you want to mark.
+        * "members" (array[string], optional): A list of specific member names.
+        * "note": You *must* use either "teamName" OR "members". "teamName" is preferred if the user says "all members" or "the whole team".
+    * JSON: {"action": "SET_ATTENDANCE", "payload": {"teamName": "Fixspire", "status": "Present"}}
+
 --- DATA CONTEXT ---
 ${context}
 

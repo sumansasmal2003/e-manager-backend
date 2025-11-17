@@ -1,4 +1,5 @@
 const Activity = require('../models/Activity');
+const { logError } = require('../services/logService');
 
 // @desc    Get all activity for a team
 // @route   GET /api/activity/:teamId
@@ -11,6 +12,7 @@ exports.getActivityForTeam = async (req, res) => {
 
     res.json(activities);
   } catch (error) {
+    logError(req.user.id, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error' });
   }
 };
@@ -26,6 +28,7 @@ exports.getAllActivityForTeam = async (req, res) => {
 
     res.json(activities);
   } catch (error) {
+    logError(req.user.id, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error' });
   }
 };

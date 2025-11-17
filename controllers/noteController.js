@@ -1,4 +1,5 @@
 const Note = require('../models/Note');
+const { logError } = require('../services/logService');
 
 // @desc    Get all notes for the logged-in user
 // @route   GET /api/notes
@@ -9,6 +10,7 @@ exports.getMyNotes = async (req, res) => {
     res.json(notes);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -30,6 +32,7 @@ exports.createNote = async (req, res) => {
     res.status(201).json(createdNote);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -59,6 +62,7 @@ exports.updateNote = async (req, res) => {
     res.json(updatedNote);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -81,5 +85,6 @@ exports.deleteNote = async (req, res) => {
     res.json({ message: 'Note removed' });
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };

@@ -7,6 +7,7 @@ const Activity = require('../models/Activity');
 const { logActivity } = require('../services/activityService');
 const { generateAIReport } = require('../services/reportService');
 const { logAiAction } = require('../services/aiLogService');
+const { logError } = require('../services/logService');
 
 // @desc    Create a new team
 // @route   POST /api/teams
@@ -42,6 +43,7 @@ res.status(201).json(populatedTeam);
   } catch (error) {
     // This catch block is what sends the 500 error
     console.error('Create Team Error:', error.message); // This will help us debug in the future
+    logError(req.user.id, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
@@ -58,6 +60,7 @@ exports.getMyTeams = async (req, res) => {
     res.json(teams);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -104,6 +107,7 @@ exports.addTeamMember = async (req, res) => {
     res.json(populatedTeam);
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -127,6 +131,7 @@ exports.getTeamById = async (req, res) => {
     res.json(team);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -159,6 +164,7 @@ exports.deleteTeam = async (req, res) => {
     res.json({ message: 'Team disbanded successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -202,6 +208,7 @@ exports.addFigmaLink = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -246,6 +253,7 @@ exports.deleteFigmaLink = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -284,6 +292,7 @@ exports.addGithubRepo = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -323,6 +332,7 @@ exports.deleteGithubRepo = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -388,6 +398,7 @@ exports.removeTeamMember = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -482,6 +493,7 @@ exports.generateTeamReport = async (req, res) => {
   } catch (error) {
     console.error('Report generation error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -520,6 +532,7 @@ exports.addLiveProject = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
 
@@ -559,5 +572,6 @@ exports.deleteLiveProject = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(userId, error, req.originalUrl);
   }
 };
