@@ -25,6 +25,7 @@ const activitySchema = new mongoose.Schema(
         'TASK_DELETED',
         'MEETING_SCHEDULED',
         'NOTE_CREATED',
+        'NOTE_UPDATED',
         'NOTE_DELETED',
         'FIGMA_LINK_ADDED',
         'FIGMA_LINK_DELETED',
