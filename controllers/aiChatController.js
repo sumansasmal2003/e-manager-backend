@@ -20,7 +20,7 @@ const { createZoomLink } = require('../controllers/meetingController');
 /**
  * Gathers all relevant data for a user to build an AI context.
  */
-const gatherAllUserData = async (userId, username, timezone) => {
+exports.gatherAllUserData = async (userId, username, timezone) => {
   // 1. Fetch all data in parallel
   const [
     userTeams,
