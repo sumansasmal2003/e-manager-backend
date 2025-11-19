@@ -192,7 +192,7 @@ exports.askAiChatbot = async (req, res) => {
 
   try {
     // 1. Gather all data for context
-    const { dataContext, userTeams } = await gatherAllUserData(userId, username, timezone);
+    const { dataContext, userTeams } = await this.gatherAllUserData(userId, username, timezone);
     const teamIds = userTeams.map(t => t._id); // Get team IDs for filtering
 
     // 2. AI Call 1: Determine what the user *wants* to do
