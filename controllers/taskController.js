@@ -1,24 +1,45 @@
 const Task = require('../models/Task');
 const Team = require('../models/Team');
 const TeamNote = require('../models/TeamNote');
+const User = require('../models/User'); // <-- Don't forget to import User
 const { logActivity } = require('../services/activityService');
 const { generateAISubtasks, generateTaskEstimate } = require('../services/reportService');
 const { logAiAction } = require('../services/aiLogService');
 const { logError } = require('../services/logService');
 
-// We re-use this check from teamController, but we need to fetch the team
+// --- HELPER: Shared Access Logic (Same as in teamController) ---
+const hasTeamAccess = async (team, user) => {
+  // 1. If user is the direct owner of the team
+  if (team.owner.toString() === user.id) {
+    return true;
+  }
+
+  // 2. If user is an 'owner' (Super Admin)
+  if (user.role === 'owner') {
+    // Fetch the team owner's details
+    const teamOwner = await User.findById(team.owner);
+    // Check if the team owner reports to this User (the Owner)
+    if (teamOwner && teamOwner.ownerId && teamOwner.ownerId.toString() === user.id) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+// --- MIDDLEWARE: Check Team Membership ---
+// This is used by Tasks, Meetings, and Team Notes routes
 const checkTeamMembership = async (req, res, next) => {
   try {
     let teamId = req.params.teamId;
 
+    // If no teamId in params, try to find it via the resource ID
     if (!teamId) {
-      // Check if it's a task route
       if (req.params.taskId) {
         const task = await Task.findById(req.params.taskId);
         if (!task) return res.status(404).json({ message: 'Task not found' });
         teamId = task.team;
       }
-      // Check if it's a teamnote route
       else if (req.params.noteId) {
         const note = await TeamNote.findById(req.params.noteId);
         if (!note) return res.status(404).json({ message: 'Team note not found' });
@@ -35,16 +56,18 @@ const checkTeamMembership = async (req, res, next) => {
       return res.status(404).json({ message: 'Team not found' });
     }
 
-    // Check if the logged-in user is the OWNER
-    if (team.owner.toString() !== req.user.id) {
+    // --- NEW: Use the Helper to check access ---
+    const isAuthorized = await hasTeamAccess(team, req.user);
+    if (!isAuthorized) {
       return res.status(401).json({ message: 'Not authorized for this team' });
     }
 
-    // Attach team to request for later use
+    // Attach team to request for the next controller to use
     req.team = team;
     next();
   } catch (error) {
-    return res.status(500).json({ message: 'Server Error' });
+    console.error('Check Team Membership Error:', error);
+    return res.status(500).json({ message: 'Server Error during authorization check' });
   }
 };
 
@@ -52,13 +75,12 @@ const checkTeamMembership = async (req, res, next) => {
 exports.getTasksForTeam = async (req, res) => {
   try {
     const tasks = await Task.find({ team: req.params.teamId })
-      // No longer need to populate 'assignedTo' or 'createdBy'
       .sort({ createdAt: -1 });
 
     res.json(tasks);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
@@ -67,6 +89,9 @@ exports.updateTask = async (req, res) => {
   try {
     const { title, description, status, dueDate, assignedTo } = req.body;
     const task = await Task.findById(req.params.taskId);
+
+    // Note: checkTeamMembership already ran before this,
+    // so we know the user has access to this task's team.
 
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
@@ -88,15 +113,15 @@ exports.updateTask = async (req, res) => {
 
     const updatedTask = await task.save();
     logActivity(
-  updatedTask.team,
-  req.user.id,
-  'TASK_UPDATED',
-  `Updated task '${updatedTask.title}' (Status: ${updatedTask.status})`
-);
-res.json(updatedTask);
+      updatedTask.team,
+      req.user.id,
+      'TASK_UPDATED',
+      `Updated task '${updatedTask.title}' (Status: ${updatedTask.status})`
+    );
+    res.json(updatedTask);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
@@ -104,8 +129,11 @@ res.json(updatedTask);
 // @route   POST /api/tasks/:teamId/bulk
 exports.createBulkTasks = async (req, res) => {
   try {
+    if (req.user.role === 'manager' && !req.user.permissions.canCreateTasks) {
+      return res.status(403).json({ message: 'Restricted: You do not have permission to create tasks.' });
+    }
     const { assignedTo, tasks } = req.body;
-    const team = req.team;
+    const team = req.team; // From middleware
 
     if (!assignedTo || !team.members.includes(assignedTo)) {
       return res.status(400).json({
@@ -119,7 +147,6 @@ exports.createBulkTasks = async (req, res) => {
 
     const tasksToCreate = tasks.map(task => {
       if (!task.title || task.title.trim() === '') {
-        // This should be caught by the frontend, but good to have
         throw new Error('All tasks must have a title.');
       }
       return {
@@ -128,35 +155,31 @@ exports.createBulkTasks = async (req, res) => {
         description: task.description || '',
         status: 'Pending',
         assignedTo: assignedTo,
-        createdBy: req.user.id,
+        createdBy: req.user.id, // The Owner or Manager ID
         dueDate: task.dueDate || null,
       };
     });
 
     const createdTasks = await Task.insertMany(tasksToCreate);
     for (const task of createdTasks) {
-  logActivity(
-    task.team,
-    req.user.id,
-    'TASK_CREATED',
-    `Created task '${task.title}' for ${task.assignedTo}`
-  );
-}
-res.status(201).json(createdTasks);
+      logActivity(
+        task.team,
+        req.user.id,
+        'TASK_CREATED',
+        `Created task '${task.title}' for ${task.assignedTo}`
+      );
+    }
+    res.status(201).json(createdTasks);
 
   } catch (error) {
-    // --- BETTER ERROR HANDLING ---
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: 'Validation failed', error: error.message });
     }
-    // Handle the specific error we might throw
     if (error.message === 'All tasks must have a title.') {
         return res.status(400).json({ message: error.message });
     }
-
-    // Fallback for other errors
     res.status(500).json({ message: 'Server Error', error: error.message });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
@@ -165,25 +188,20 @@ res.status(201).json(createdTasks);
 exports.deleteTask = async (req, res) => {
   try {
     const task = await Task.findById(req.params.taskId);
+    if (!task) return res.status(404).json({ message: 'Task not found' });
 
-    if (!task) {
-      return res.status(404).json({ message: 'Task not found' });
+    // --- PERMISSION CHECK ---
+    if (req.user.role === 'manager' && !req.user.permissions.canDeleteTasks) {
+      return res.status(403).json({ message: 'Restricted: You do not have permission to delete tasks.' });
     }
+    // ------------------------
 
-    // Authorization is handled by the checkTeamMembership middleware
-    // We can just delete the task
-    logActivity(
-  task.team,
-  req.user.id,
-  'TASK_DELETED',
-  `Deleted task '${task.title}'`
-);
-await task.deleteOne();
+    logActivity(task.team, req.user.id, 'TASK_DELETED', `Deleted task '${task.title}'`);
+    await task.deleteOne();
     res.json({ message: 'Task removed successfully' });
-
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
@@ -205,7 +223,7 @@ exports.generateSubtasks = async (req, res) => {
   } catch (error) {
     console.error('Generate Subtasks Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
@@ -215,26 +233,26 @@ exports.generateSubtasks = async (req, res) => {
  */
 exports.getTaskEstimate = async (req, res) => {
   const { title, teamId } = req.body;
-  const timezone = req.body.timezone || 'UTC'; // Get timezone from body
+  const timezone = req.body.timezone || 'UTC';
 
   if (!title || !teamId) {
     return res.status(400).json({ message: 'Task title and teamId are required' });
   }
 
   try {
-    // 1. Ensure user owns this team (Security Check)
     const team = await Team.findById(teamId);
-    if (!team || team.owner.toString() !== req.user.id) {
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+
+    // --- NEW: Use Helper to check access ---
+    const isAuthorized = await hasTeamAccess(team, req.user);
+    if (!isAuthorized) {
       return res.status(401).json({ message: 'Not authorized for this team' });
     }
 
-    // 2. Call the AI service
     const estimate = await generateTaskEstimate(title, teamId, timezone);
-
-    // 3. Log the AI action
     logAiAction(req.user.id, 'AI_TASK_ESTIMATE');
-
-    // 4. Return the estimate
     res.json(estimate);
 
   } catch (error) {
@@ -244,5 +262,4 @@ exports.getTaskEstimate = async (req, res) => {
   }
 };
 
-// We also need to update the task routes to use the new check
 exports.checkTeamMembership = checkTeamMembership;

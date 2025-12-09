@@ -2,15 +2,31 @@ const Team = require('../models/Team');
 const Task = require('../models/Task');
 const Note = require('../models/Note');
 const Meeting = require('../models/Meeting');
+const User = require('../models/User'); // <-- Import User
 const { logActivity } = require('../services/activityService');
 const { generateAIDailyBriefing } = require('../services/reportService');
 const { logAiAction } = require('../services/aiLogService');
 const { logError } = require('../services/logService');
+const { checkAndResetDailyUsage } = require('../services/usageService');
 
-const fetchActionItemsData = async (userId) => {
-  // 1. Get user's team IDs
-  const userTeams = await Team.find({ owner: userId }).select('_id');
-  const teamIds = userTeams.map(team => team._id);
+// --- HELPER: Get all Team IDs the user is allowed to see ---
+const getAllowedTeamIds = async (user) => {
+  let owners = [user.id];
+
+  // If Owner, add all their managers to the list
+  if (user.role === 'owner') {
+    const managers = await User.find({ ownerId: user.id }).distinct('_id');
+    owners = [...owners, ...managers];
+  }
+
+  // Find all teams owned by these users
+  const teams = await Team.find({ owner: { $in: owners } }).select('_id');
+  return teams.map(t => t._id);
+};
+
+const fetchActionItemsData = async (user) => {
+  // 1. Get all relevant team IDs
+  const teamIds = await getAllowedTeamIds(user);
 
   // 2. Define date ranges
   const todayStart = new Date();
@@ -19,7 +35,7 @@ const fetchActionItemsData = async (userId) => {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
 
-  // 3. Find Today's Meetings
+  // 3. Find Today's Meetings (Across all allowed teams)
   const todayMeetingsQuery = Meeting.find({
     team: { $in: teamIds },
     meetingTime: { $gte: todayStart, $lte: todayEnd }
@@ -27,7 +43,7 @@ const fetchActionItemsData = async (userId) => {
   .sort({ meetingTime: 1 })
   .populate('team', 'teamName');
 
-  // 4. Find Actionable Tasks
+  // 4. Find Actionable Tasks (Across all allowed teams)
   const overdueTasksQuery = Task.find({
     team: { $in: teamIds },
     dueDate: { $lt: todayStart },
@@ -40,9 +56,9 @@ const fetchActionItemsData = async (userId) => {
     status: { $ne: 'Completed' }
   });
 
-  // 5. Find Weekly Personal Notes
+  // 5. Find Weekly Personal Notes (Keep these personal to the logged-in user)
   const weeklyNotesQuery = Note.find({
-    user: userId,
+    user: user.id,
     planPeriod: 'This Week'
   }).sort({ createdAt: -1 });
 
@@ -59,7 +75,6 @@ const fetchActionItemsData = async (userId) => {
     weeklyNotesQuery
   ]);
 
-  // Combine tasks for easier frontend use
   const actionTasks = {
     overdue: overdueTasks,
     dueToday: dueTodayTasks
@@ -68,38 +83,76 @@ const fetchActionItemsData = async (userId) => {
   return { todayMeetings, actionTasks, weeklyNotes };
 };
 
-// @desc    Get overview statistics for the logged-in user
+const getPlanLimit = (plan) => {
+  const PLAN_LIMITS = { free: 10, professional: 100, premium: 9999 };
+  return PLAN_LIMITS[plan] || 10;
+};
+
+// @desc    Get overview statistics for the logged-in user (or Organization for Owner)
 // @route   GET /api/stats/overview
 exports.getOverviewStats = async (req, res) => {
   try {
+    await checkAndResetDailyUsage(req.user.id);
     const userId = req.user.id;
 
-    // 1. Find all teams owned by the user
-    const userTeams = await Team.find({ owner: userId }).select('_id');
-    const teamIds = userTeams.map(team => team._id);
+    // 1. Get Team IDs (The Scope)
+    const teamIds = await getAllowedTeamIds(req.user);
 
-    // 2. Get counts (These are your existing queries)
+    let aiStats = { used: 0, limit: 0 };
+
+    if (req.user.role === 'owner') {
+        // 1. Fetch Owner's Plan Limit
+        const ownerPlan = req.user.subscription?.plan || 'free';
+        aiStats.limit = getPlanLimit(ownerPlan);
+
+        // 2. Fetch All Managers linked to Owner
+        const managers = await User.find({ ownerId: userId }).select('subscription.aiUsageCount');
+
+        // 3. Sum Owner Usage + All Managers Usage
+        const ownerUsage = req.user.subscription?.aiUsageCount || 0;
+        const managersUsage = managers.reduce((sum, m) => sum + (m.subscription?.aiUsageCount || 0), 0);
+
+        aiStats.used = ownerUsage + managersUsage;
+    } else {
+        // Manager View
+        aiStats.used = req.user.subscription?.aiUsageCount || 0;
+
+        if (req.user.aiAllocatedLimit !== null) {
+            aiStats.limit = req.user.aiAllocatedLimit;
+        } else {
+            // If shared, fetch owner to get the plan limit
+            const owner = await User.findById(req.user.ownerId).select('subscription.plan');
+            aiStats.limit = getPlanLimit(owner?.subscription?.plan);
+        }
+    }
+
+    // 2. Get counts
+    // Notes remain personal
     const totalNotes = Note.countDocuments({ user: userId });
-    const totalTeams = Team.countDocuments({ owner: userId });
+
+    // Teams count depends on role (handled by getAllowedTeamIds logic implicitly?)
+    // Actually, teamIds.length IS the total teams count for the dashboard
+    const totalTeams = teamIds.length;
+
     const totalTasks = Task.countDocuments({ team: { $in: teamIds } });
     const upcomingMeetings = Meeting.countDocuments({
       team: { $in: teamIds },
       meetingTime: { $gte: new Date() }
     });
 
-    // 3. Get data for Task Status chart (Your existing query)
+    // 3. Get data for Task Status chart
     const taskStats = Task.aggregate([
       { $match: { team: { $in: teamIds } } },
       { $group: { _id: '$status', count: { $sum: 1 } } }
     ]);
 
-    // 4. Get recent activity (Your existing query)
+    // 4. Get recent activity (Keep personal notes personal)
     const recentNotes = Note.find({ user: userId })
       .sort({ updatedAt: -1 })
       .limit(5)
-      .select('title _id');
+      .select('title _id category updatedAt');
 
-    // 5. Get next upcoming meetings (Your existing query)
+    // 5. Get next upcoming meetings
     const nextMeetings = Meeting.find({
       team: { $in: teamIds },
       meetingTime: { $gte: new Date() }
@@ -109,21 +162,20 @@ exports.getOverviewStats = async (req, res) => {
       .populate('team', 'teamName')
       .select('title meetingTime team');
 
-    // --- 6. NEW: Define Date Range for Activity Line Chart ---
+    // --- 6. Date Range for Activity Line Chart ---
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - 30);
     startDate.setHours(0, 0, 0, 0);
 
-    // --- 7. NEW: Query for Workload Distribution (Bar Chart) ---
-    // This query finds all *active* (not completed) tasks and groups them by assignee.
+    // --- 7. Workload Distribution ---
     const workloadQuery = Task.aggregate([
       { $match: { team: { $in: teamIds }, status: { $ne: 'Completed' } } },
       { $group: { _id: '$assignedTo', count: { $sum: 1 } } },
-      { $sort: { count: -1 } } // Sort descending
+      { $sort: { count: -1 } }
     ]);
 
-    // --- 8. NEW: Query for Tasks Created (Line Chart) ---
+    // --- 8. Tasks Created ---
     const tasksCreatedQuery = Task.aggregate([
       { $match: { team: { $in: teamIds }, createdAt: { $gte: startDate, $lte: endDate } } },
       {
@@ -135,13 +187,13 @@ exports.getOverviewStats = async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-    // --- 9. NEW: Query for Tasks Completed (Line Chart) ---
+    // --- 9. Tasks Completed ---
     const tasksCompletedQuery = Task.aggregate([
       {
         $match: {
           team: { $in: teamIds },
           status: 'Completed',
-          updatedAt: { $gte: startDate, $lte: endDate } // Use updatedAt to see when it was completed
+          updatedAt: { $gte: startDate, $lte: endDate }
         }
       },
       {
@@ -153,99 +205,93 @@ exports.getOverviewStats = async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-
-    // --- 10. UPDATED: Run all queries in parallel ---
+    // --- 10. Run all queries ---
     const [
-      notes,
-      teams,
-      tasks,
+      notesCount,
+      // teamsCount is just teamIds.length
+      tasksCount,
       meetingsCount,
       taskStatusData,
       notesActivity,
       meetingsActivity,
-      workloadData, // <-- New result
-      createdData,  // <-- New result
-      completedData // <-- New result
+      workloadData,
+      createdData,
+      completedData
     ] = await Promise.all([
       totalNotes,
-      totalTeams,
+      // totalTeams (already have it)
       totalTasks,
       upcomingMeetings,
       taskStats,
       recentNotes,
       nextMeetings,
-      workloadQuery,        // <-- New query
-      tasksCreatedQuery,    // <-- New query
-      tasksCompletedQuery   // <-- New query
+      workloadQuery,
+      tasksCreatedQuery,
+      tasksCompletedQuery
     ]);
 
-    // Format task stats for the chart (Your existing code)
+    // Format task stats
     const taskChartData = taskStatusData.map(stat => ({
       name: stat._id,
       value: stat.count
     }));
 
-    // --- 11. NEW: Format Workload Chart Data ---
-    // Map `_id` (which is the name) to `name` for easier frontend use
+    // Format Workload
     const workloadChartData = workloadData.map(item => ({
       name: item._id,
       tasks: item.count
     }));
 
-    // --- 12. NEW: Format Activity Line Chart Data ---
-    // Convert array results to a Map for efficient lookups
+    // Format Activity Line Chart
     const createdMap = new Map(createdData.map(item => [item._id, item.count]));
     const completedMap = new Map(completedData.map(item => [item._id, item.count]));
 
     const activityChartData = [];
-    // Loop from 30 days ago to today
     for (let i = 0; i < 30; i++) {
       const day = new Date(startDate);
       day.setDate(startDate.getDate() + i);
       const dateString = day.toISOString().split('T')[0];
 
       activityChartData.push({
-        date: dateString.substring(5), // Format as "MM-DD"
+        date: dateString.substring(5), // "MM-DD"
         created: createdMap.get(dateString) || 0,
         completed: completedMap.get(dateString) || 0
       });
     }
 
-    // --- 13. UPDATED: Send all data in response ---
     res.json({
       stats: {
-        totalNotes: notes,
-        totalTeams: teams,
-        totalTasks: tasks,
+        totalNotes: notesCount,
+        totalTeams: totalTeams,
+        totalTasks: tasksCount,
         upcomingMeetings: meetingsCount
       },
+      aiStats,
       taskChartData,
       recentNotes: notesActivity,
       upcomingMeetings: meetingsActivity,
-      workloadChartData,  // <-- Add new data
-      activityChartData   // <-- Add new data
+      workloadChartData,
+      activityChartData
     });
 
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
-// @desc    Get all action items for the leader's 'Today' page
+// @desc    Get all action items for the 'Today' page
 // @route   GET /api/stats/action-items
 exports.getActionItems = async (req, res) => {
   try {
-    // --- THIS FUNCTION IS NOW SIMPLER ---
-    const data = await fetchActionItemsData(req.user.id);
+    // Pass the full user object to check role
+    const data = await fetchActionItemsData(req.user);
     res.json(data);
-    // --- END OF CHANGE ---
-
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
@@ -255,23 +301,18 @@ exports.getActionItems = async (req, res) => {
  */
 exports.getAIDailyBriefing = async (req, res) => {
   try {
-    // 1. Get the same data as getActionItems
-    const actionItems = await fetchActionItemsData(req.user.id);
-
-    // 2. Get the user's name for personalization
+    const actionItems = await fetchActionItemsData(req.user);
     const username = req.user.username;
 
-    // 3. Call the AI service
+    // Use existing service logic, just passing the aggregated data
     const briefing = await generateAIDailyBriefing(username, actionItems);
 
     logAiAction(req.user.id, 'AI_DAILY_BRIEFING');
-
-    // 4. Send the briefing back
     res.json({ briefing });
 
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server Error', error: error.message });
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
   }
 };

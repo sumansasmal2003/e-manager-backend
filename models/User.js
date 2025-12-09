@@ -2,16 +2,8 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const connecteamAccountSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, 'Please provide a name for the account'],
-    trim: true,
-  },
-  link: {
-    type: String,
-    required: [true, 'Please provide the link'],
-    trim: true,
-  },
+  name: { type: String, required: [true, 'Please provide a name'], trim: true },
+  link: { type: String, required: [true, 'Please provide the link'], trim: true },
 });
 
 const userSchema = new mongoose.Schema({
@@ -34,76 +26,108 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please provide a password'],
     minlength: 6,
-    select: false, // Don't send password in responses by default
+    select: false,
   },
 
-  // --- ADDED COMPANY FIELDS ---
-  companyName: {
+  // --- HIERARCHY FIELDS ---
+  role: {
     type: String,
-    trim: true,
-    default: ''
+    enum: ['owner', 'manager'],
+    default: 'owner', // Default to owner for new signups
+    required: true
   },
-  companyAddress: {
-    type: String,
-    trim: true,
-    default: ''
+  ownerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
   },
-  companyWebsite: {
-    type: String,
-    trim: true,
-    default: ''
+
+  // --- COMPANY FIELDS ---
+  companyName: { type: String, trim: true, default: '' },
+  companyAddress: { type: String, trim: true, default: '' },
+  companyWebsite: { type: String, trim: true, default: '' },
+  ceoName: { type: String, trim: true, default: '' },
+  hrName: { type: String, trim: true, default: '' },
+  hrEmail: { type: String, trim: true, default: '' },
+
+  // --- NEW: SUBSCRIPTION FIELDS ---
+  // This is where the plan is stored.
+  subscription: {
+    plan: {
+      type: String,
+      enum: ['free', 'professional', 'premium'],
+      default: 'free' // <--- THIS LINE makes it automatic!
+    },
+
+    adWatchProgress: { type: Number, default: 0 },
+    targetUpgradePlan: { type: String, default: null },
+
+    status: {
+      type: String,
+      enum: ['active', 'canceled', 'past_due'],
+      default: 'active'
+    },
+    startDate: { type: Date, default: Date.now },
+    endDate: { type: Date, default: null }, // Null means "Free Forever"
+    aiUsageCount: { type: Number, default: 0 },
+    lastUsageReset: { type: Date, default: Date.now }
   },
-  ceoName: {
-    type: String,
-    trim: true,
-    default: ''
+  // ------------------------------
+
+  aiAllocatedLimit: {
+    type: Number,
+    default: null // null = Use Shared Pool. Number = Specific Limit. 0 = Blocked.
   },
-  hrName: {
-    type: String,
-    trim: true,
-    default: ''
+
+  isActive: {
+    type: Boolean,
+    default: true, // Active by default
   },
-  hrEmail: {
-    type: String,
-    trim: true,
-    default: '',
-    // Optional validation
-    match: [
-      /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
-      'Please fill a valid email address',
-    ],
+
+  permissions: {
+    canCreateTasks: { type: Boolean, default: true },
+    canCreateMeetings: { type: Boolean, default: true },
+    canCreateNotes: { type: Boolean, default: true },
+
+    canDeleteTasks: { type: Boolean, default: true },
+    canDeleteMeetings: { type: Boolean, default: true },
+    canDeleteNotes: { type: Boolean, default: true },
+    canExportReports: { type: Boolean, default: false }, // Default false for security
+
+    canCreateResources: { type: Boolean, default: true },
+    canDeleteResources: { type: Boolean, default: true },
   },
-  // --- END ADDED FIELDS ---
 
   connecteamAccounts: [connecteamAccountSchema],
-  passwordResetOTP: {
-    type: String,
-    select: false, // Don't send this in responses by default
-  },
-  passwordResetExpires: {
-    type: Date,
-    select: false, // Don't send this in responses by default
-  },
+  passwordResetOTP: { type: String, select: false },
+  passwordResetExpires: { type: Date, select: false },
   googleAccessToken: { type: String, select: false },
   googleRefreshToken: { type: String, select: false },
   googleCalendarConnected: { type: Boolean, default: false },
+  isTwoFactorEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  twoFactorSecret: {
+    type: Object, // speakeasy stores an object with ascii, hex, base32
+    select: false, // Hide by default
+  },
+  branding: {
+    logoUrl: { type: String, default: '' }, // URL from Cloudinary/S3
+    primaryColor: { type: String, default: '#111827' } // Default Zinc-900
+  },
 }, {
-  timestamps: true, // Adds createdAt and updatedAt fields
+  timestamps: true,
 });
 
-// Middleware: Hash password before saving the user
+// Middleware: Hash password
 userSchema.pre('save', async function (next) {
-  // Only hash the password if it has been modified (or is new)
-  if (!this.isModified('password')) {
-    return next();
-  }
-
+  if (!this.isModified('password')) return next();
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
-// Method: Compare entered password with hashed password in DB
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

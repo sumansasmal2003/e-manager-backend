@@ -199,6 +199,11 @@ exports.askAiChatbot = async (req, res) => {
     const intentResponse = await determineUserIntent(question, dataContext, history);
     const intent = JSON.parse(intentResponse);
 
+    if (req.userWithSubscription) {
+      req.userWithSubscription.subscription.aiUsageCount += 1;
+      await req.userWithSubscription.save(); // Save the increment
+    }
+
     // 3. Act as a router based on the AI's intent
     switch (intent.action) {
 

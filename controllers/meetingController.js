@@ -81,6 +81,9 @@ exports.generateZoomMeeting = async (req, res) => {
 // @desc    Schedule a new meeting for a team
 exports.scheduleMeeting = async (req, res) => {
   try {
+    if (req.user.role === 'manager' && !req.user.permissions.canCreateMeetings) {
+      return res.status(403).json({ message: 'Restricted: You do not have permission to schedule meetings.' });
+    }
     const { title, agenda, meetingTime, meetingLink, participants } = req.body;
     const team = req.team; // From checkTeamMembership
 
@@ -242,6 +245,10 @@ exports.deleteMeeting = async (req, res) => {
 
     if (!meeting) {
       return res.status(404).json({ message: 'Meeting not found' });
+    }
+
+    if (req.user.role === 'manager' && !req.user.permissions.canDeleteMeetings) {
+      return res.status(403).json({ message: 'Restricted: You do not have permission to delete meetings.' });
     }
 
     // --- Authorization Check ---

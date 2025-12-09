@@ -1,15 +1,124 @@
-// controllers/googleAuthController.js
-const { OAuth2Client } = require('google-auth-library');
+const { google } = require('googleapis');
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
 const { logError } = require('../services/logService');
 
-const oAuth2Client = new OAuth2Client(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI // Your backend callback URL
+// --- CONFIGURATION ---
+const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+// 1. Client for Calendar Integration (Existing)
+// Uses the redirect URI specifically for settings/calendar linking
+const calendarAuthClient = new google.auth.OAuth2(
+  CLIENT_ID,
+  CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI // e.g., http://localhost:5000/api/auth/google/callback
 );
 
-// @desc    Redirects user to Google's auth screen
+// 2. Client for Auth/Registration (New)
+// Uses a distinct redirect URI for the login flow
+const loginAuthClient = new google.auth.OAuth2(
+  CLIENT_ID,
+  CLIENT_SECRET,
+  `http://localhost:5000/api/auth/google/callback` // e.g., http://localhost:5000/api/google-auth/callback
+);
+
+// Helper to generate JWT
+const generateToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: '30d',
+  });
+};
+
+/* ======================================================
+   SECTION 1: GOOGLE SIGN-IN & REGISTRATION
+   (Public Routes - No Login Required)
+   ====================================================== */
+
+// @desc    Initiate Google Login/Register
+// @route   GET /api/google-auth/google
+exports.googleLogin = (req, res) => {
+  const url = loginAuthClient.generateAuthUrl({
+    access_type: 'offline',
+    scope: [
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/userinfo.email'
+    ]
+  });
+  res.redirect(url);
+};
+
+// @desc    Handle Google Login Callback
+// @route   GET /api/google-auth/callback
+exports.googleLoginCallback = async (req, res) => {
+  const { code } = req.query;
+
+  try {
+    const { tokens } = await loginAuthClient.getToken(code);
+    loginAuthClient.setCredentials(tokens);
+
+    const oauth2 = google.oauth2({ version: 'v2', auth: loginAuthClient });
+    const { data } = await oauth2.userinfo.get();
+
+    if (!data.email) {
+      return res.redirect(`${FRONTEND_URL}/login?error=NoEmailFound`);
+    }
+
+    // 1. Check if user exists
+    let user = await User.findOne({ email: data.email });
+
+    if (!user) {
+      // --- CASE A: NEW USER ---
+      // Create with EMPTY companyName to trigger setup flow
+      user = await User.create({
+        username: data.name,
+        email: data.email,
+        password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8),
+        role: 'owner',
+        companyName: '', // <--- EMPTY: Triggers /setup-organization
+        isTwoFactorEnabled: false
+      });
+    }
+    // --- CASE B: EXISTING USER ---
+    // They already have a companyName (or it's empty if they abandoned setup previously)
+
+    if (user.isActive === false) {
+      return res.redirect(`${FRONTEND_URL}/login?error=AccountSuspended`);
+    }
+
+    const token = generateToken(user._id);
+
+    // 2. Prepare Data for Frontend
+    const userData = JSON.stringify({
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions,
+      subscription: user.subscription,
+      branding: user.branding,
+      isTwoFactorEnabled: user.isTwoFactorEnabled,
+      companyName: user.companyName, // Frontend checks this string
+      token: token
+    });
+
+    // 3. Redirect to Login Page (Frontend handles the routing logic)
+    res.redirect(`${FRONTEND_URL}/login?token=${token}&userData=${encodeURIComponent(userData)}`);
+
+  } catch (error) {
+    console.error('Google Login Error:', error);
+    res.redirect(`${FRONTEND_URL}/login?error=GoogleAuthFailed`);
+  }
+};
+
+
+/* ======================================================
+   SECTION 2: CALENDAR INTEGRATION
+   (Protected Routes - Requires User to be Logged In)
+   ====================================================== */
+
+// @desc    Connect Google Calendar
 // @route   GET /api/auth/google
 exports.googleAuth = (req, res) => {
   const scopes = [
@@ -17,87 +126,68 @@ exports.googleAuth = (req, res) => {
     'https://www.googleapis.com/auth/calendar.events'
   ];
 
-  const authUrl = oAuth2Client.generateAuthUrl({
-    access_type: 'offline', // IMPORTANT: Asks for a refresh_token
+  const authUrl = calendarAuthClient.generateAuthUrl({
+    access_type: 'offline', // Request refresh token
     scope: scopes,
-    // Pass the user's ID so we know who to save the token for
-    state: req.user.id
+    state: req.user.id // Pass logged-in user ID
   });
-  // res.redirect(authUrl);
+
   res.json({ authUrl });
 };
 
-// @desc    Handles the callback from Google
+// @desc    Handle Calendar Callback
 // @route   GET /api/auth/google/callback
 exports.googleAuthCallback = async (req, res) => {
   const { code, state } = req.query;
-  const userId = state; // Get the user's ID we passed in
+  const userId = state; // Recover user ID from state
 
   try {
-    // 1. Exchange the code for tokens
-    const { tokens } = await oAuth2Client.getToken(code);
-    const { access_token, refresh_token } = tokens;
+    const { tokens } = await calendarAuthClient.getToken(code);
 
-    // 2. Find the user and save the tokens
     const user = await User.findById(userId);
     if (!user) {
-      // This should not happen if the flow started correctly
-      return res.redirect('https://emanagerpro.vercel.app/settings?google=error');
-      // return res.redirect('http://localhost:5173/settings?google=error');
+      return res.redirect(`${process.env.FRONTEND_URL}/settings?google=error`);
     }
 
-    user.googleAccessToken = access_token;
-    if (refresh_token) {
-      // A refresh token is only given the FIRST time a user authorizes
-      user.googleRefreshToken = refresh_token;
+    user.googleAccessToken = tokens.access_token;
+    if (tokens.refresh_token) {
+      user.googleRefreshToken = tokens.refresh_token;
     }
     user.googleCalendarConnected = true;
     await user.save();
 
-    // 3. Redirect back to the frontend settings page
-    res.redirect('https://emanagerpro.vercel.app/settings?google=success');
-    // res.redirect('http://localhost:5173/settings?google=success');
+    res.redirect(`${process.env.FRONTEND_URL}/settings?google=success`);
 
   } catch (error) {
-    console.error('Google Auth Callback Error:', error);
-    logError(userId, error, req.originalUrl);
-    res.redirect('YOUR_FRONTEND_URL/settings?google=error');
+    console.error('Google Calendar Callback Error:', error);
+    if (userId) logError(userId, error, req.originalUrl);
+    res.redirect(`${process.env.FRONTEND_URL}/settings?google=error`);
   }
 };
 
-/**
- * @desc    Disconnects Google Calendar and revokes tokens
- * @route   DELETE /api/auth/google/disconnect
- */
+// @desc    Disconnect Google Calendar
+// @route   DELETE /api/auth/google/disconnect
 exports.googleDisconnect = async (req, res) => {
   try {
-    // 1. Find the user and explicitly select the tokens
-    const user = await User.findById(req.user.id).select(
-      '+googleAccessToken +googleRefreshToken'
-    );
+    const user = await User.findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // 2. Clear the Google-related fields
     user.googleAccessToken = undefined;
     user.googleRefreshToken = undefined;
     user.googleCalendarConnected = false;
 
     await user.save();
 
-    // 3. Send back the updated (and non-sensitive) user info
     res.json({
-      _id: user._id,
-      username: user.username,
-      email: user.email,
-      connecteamAccounts: user.connecteamAccounts,
-      googleCalendarConnected: user.googleCalendarConnected, // This will now be false
+      message: 'Google Calendar disconnected',
+      googleCalendarConnected: false
     });
   } catch (error) {
     console.error('Google Disconnect Error:', error);
-    logError(userId, error, req.originalUrl);
+    logError(req.user.id, error, req.originalUrl);
     res.status(500).json({ message: 'Server error while disconnecting' });
   }
 };

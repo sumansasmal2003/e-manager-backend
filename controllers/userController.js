@@ -10,6 +10,8 @@ const EmailLog = require('../models/EmailLog');
 const MemberProfile = require('../models/MemberProfile');
 const OneOnOne = require('../models/OneOnOne');
 const { logError } = require('../services/logService');
+const speakeasy = require('speakeasy');
+const qrcode = require('qrcode');
 
 // @desc    Get logged-in user's profile
 // @route   GET /api/user/profile
@@ -21,6 +23,12 @@ exports.getUserProfile = async (req, res) => {
       _id: user._id,
       username: user.username,
       email: user.email,
+      role: user.role,
+      ownerId: user.ownerId,
+      permissions: user.permissions,
+      subscription: user.subscription,
+      branding: user.branding,
+      isTwoFactorEnabled: user.isTwoFactorEnabled,
       connecteamAccounts: user.connecteamAccounts, // <-- Must be this
       googleCalendarConnected: user.googleCalendarConnected, // <-- Must be included
       companyName: user.companyName,
@@ -34,6 +42,44 @@ exports.getUserProfile = async (req, res) => {
   } else {
     res.status(404).json({ message: 'User not found' });
     logError(userId, error, req.originalUrl);
+  }
+};
+
+// @desc    Change user plan (Free <-> Pro <-> Premium)
+// @route   PUT /api/user/subscription
+exports.updateSubscription = async (req, res) => {
+  const { plan } = req.body; // 'free', 'professional', 'premium'
+
+  if (!['free', 'professional', 'premium'].includes(plan)) {
+    return res.status(400).json({ message: 'Invalid plan type' });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+
+    // Update plan
+    user.subscription.plan = plan;
+    user.subscription.status = 'active';
+
+    // Set expiration (e.g., 30 days from now for paid plans)
+    if (plan !== 'free') {
+      const nextMonth = new Date();
+      nextMonth.setDate(nextMonth.getDate() + 30);
+      user.subscription.endDate = nextMonth;
+    } else {
+      user.subscription.endDate = null; // Free forever
+    }
+
+    await user.save();
+
+    res.json({
+      message: `Successfully upgraded to ${plan}`,
+      subscription: user.subscription
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 
@@ -194,6 +240,75 @@ exports.changeUserPassword = async (req, res) => {
   }
 };
 
+// @route   GET /api/user/managers
+exports.getMyManagers = async (req, res) => {
+  try {
+    // req.user.id is the Owner's ID
+    const managers = await User.find({ ownerId: req.user.id })
+      .select('-password -connecteamAccounts -googleAccessToken -googleRefreshToken'); // Exclude sensitive/large data
+
+    res.json(managers);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(req.user.id, error, req.originalUrl);
+  }
+};
+
+// --- NEW: Delete Manager (Owner Only) ---
+// @route   DELETE /api/user/managers/:id
+exports.deleteManager = async (req, res) => {
+  try {
+    const managerId = req.params.id;
+    const ownerId = req.user.id; // The Owner taking back control
+
+    // 1. Verify this manager belongs to this owner
+    const manager = await User.findOne({ _id: managerId, ownerId: ownerId });
+    if (!manager) {
+      return res.status(404).json({ message: 'Manager not found or unauthorized' });
+    }
+
+    // --- TRANSFER ASSETS START ---
+
+    // 2. Transfer Teams
+    // All teams owned by the Manager now belong to the Owner
+    await Team.updateMany({ owner: managerId }, { owner: ownerId });
+
+    // 3. Transfer Member Profiles
+    // We attempt to move all member profiles to the Owner.
+    // Note: If the Owner ALREADY has a member with the exact same name,
+    // this might throw a duplicate key error (due to our unique index).
+    // We use a try/catch block to allow the operation to continue even if some profiles fail to transfer.
+    try {
+      await MemberProfile.updateMany({ leader: managerId }, { leader: ownerId });
+    } catch (err) {
+      console.warn("Some member profiles could not be transferred due to duplicate names.", err.message);
+    }
+
+    // 4. Transfer Attendance Records
+    await Attendance.updateMany({ leader: managerId }, { leader: ownerId });
+
+    // 5. Transfer 1-on-1 Records
+    await OneOnOne.updateMany({ leader: managerId }, { leader: ownerId });
+
+    // --- TRANSFER ASSETS END ---
+
+    // 6. Delete Personal Data & The User Account
+    // We still delete data that is strictly personal to the manager's account login
+    await Note.deleteMany({ user: managerId }); // Personal notes
+    await EmailLog.deleteMany({ user: managerId }); // Email history
+
+    // Finally, delete the manager user
+    await User.findByIdAndDelete(managerId);
+
+    res.json({ message: `Manager ${manager.username} removed. Their Teams, Members, and Data have been transferred to you.` });
+
+  } catch (error) {
+    console.error('Delete Manager Error:', error.message);
+    res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(req.user.id, error, req.originalUrl);
+  }
+};
+
 /**
  * @desc    Delete user account and all associated data
  * @route   DELETE /api/user/profile
@@ -234,5 +349,262 @@ exports.deleteUserAccount = async (req, res) => {
     console.error('Delete User Account Error:', error.message);
     res.status(500).json({ message: 'Server Error', error: error.message });
     logError(userId, error, req.originalUrl);
+  }
+};
+
+// --- NEW: Update Manager Permissions ---
+// @route   PUT /api/user/managers/:id/permissions
+exports.updateManagerPermissions = async (req, res) => {
+  try {
+    const managerId = req.params.id;
+    const { permissions } = req.body; // Expects object { canDeleteTasks: true, ... }
+
+    if (req.user.role !== 'owner') {
+      return res.status(403).json({ message: 'Only Owners can manage permissions.' });
+    }
+
+    // Find the manager and ensure they belong to this owner
+    const manager = await User.findOne({ _id: managerId, ownerId: req.user.id });
+
+    if (!manager) {
+      return res.status(404).json({ message: 'Manager not found.' });
+    }
+
+    // Update permissions
+    // We merge existing permissions with new ones to avoid overwriting missing keys
+    manager.permissions = {
+      ...manager.permissions,
+      ...permissions
+    };
+
+    await manager.save();
+
+    res.json({
+      message: 'Permissions updated successfully',
+      permissions: manager.permissions
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(req.user.id, error, req.originalUrl);
+  }
+};
+
+// --- NEW: Toggle Manager Suspension ---
+// @route   PUT /api/user/managers/:id/suspend
+exports.toggleManagerStatus = async (req, res) => {
+  try {
+    const managerId = req.params.id;
+
+    if (req.user.role !== 'owner') {
+      return res.status(403).json({ message: 'Only Owners can suspend managers.' });
+    }
+
+    const manager = await User.findOne({ _id: managerId, ownerId: req.user.id });
+
+    if (!manager) {
+      return res.status(404).json({ message: 'Manager not found.' });
+    }
+
+    // Toggle status
+    manager.isActive = !manager.isActive;
+    await manager.save();
+
+    const statusMsg = manager.isActive ? 'activated' : 'suspended';
+
+    res.json({
+      message: `Manager ${manager.username} has been ${statusMsg}.`,
+      isActive: manager.isActive
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(req.user.id, error, req.originalUrl);
+  }
+};
+
+// @desc    Track Ad Watch & Upgrade
+// @route   POST /api/user/subscription/watch-ad
+exports.recordAdWatch = async (req, res) => {
+  try {
+    // 1. Normalize input
+    const targetPlan = req.body.targetPlan.trim().toLowerCase();
+
+    const REQUIREMENTS = {
+      professional: 20,
+      premium: 50
+    };
+
+    if (!REQUIREMENTS[targetPlan]) {
+      return res.status(400).json({ message: 'Invalid target plan.' });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // 2. Ensure subscription object exists
+    if (!user.subscription) {
+        user.subscription = { plan: 'free', adWatchProgress: 0 };
+    }
+
+    // 3. Logic to Check for Reset
+    // We strictly check if the target has CHANGED.
+    const currentTarget = (user.subscription.targetUpgradePlan || '').toLowerCase();
+
+    if (currentTarget !== targetPlan) {
+      console.log(`User ${user.username} switched target to ${targetPlan}. Resetting.`);
+      user.subscription.targetUpgradePlan = targetPlan;
+      user.subscription.adWatchProgress = 0;
+    }
+
+    // 4. Increment
+    user.subscription.adWatchProgress = (user.subscription.adWatchProgress || 0) + 1;
+
+    // 5. Check for Upgrade
+    const needed = REQUIREMENTS[targetPlan];
+    let upgraded = false;
+
+    if (user.subscription.adWatchProgress >= needed) {
+      user.subscription.plan = targetPlan;
+      user.subscription.status = 'active';
+      const nextMonth = new Date();
+      nextMonth.setDate(nextMonth.getDate() + 30);
+      user.subscription.endDate = nextMonth;
+
+      // Reset counters
+      user.subscription.adWatchProgress = 0;
+      user.subscription.targetUpgradePlan = null;
+
+      upgraded = true;
+    }
+
+    // --- CRITICAL FIX: Force Mongoose to see the change ---
+    user.markModified('subscription');
+    // -----------------------------------------------------
+
+    await user.save();
+
+    res.json({
+      progress: user.subscription.adWatchProgress,
+      needed: needed,
+      upgraded: upgraded,
+      subscription: user.subscription,
+      message: upgraded
+        ? `Congratulations! You have been upgraded to ${targetPlan}.`
+        : `Ad watched. ${needed - user.subscription.adWatchProgress} more to go!`
+    });
+
+  } catch (error) {
+    console.error('Ad Watch Error:', error);
+    res.status(500).json({ message: 'Server Error' });
+    logError(req.user.id, error, req.originalUrl);
+  }
+};
+
+// --- NEW: Generate 2FA Secret & QR Code ---
+// @route   POST /api/user/2fa/generate
+exports.generate2FASecret = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    // Create temporary secret (don't enable yet)
+    const secret = speakeasy.generateSecret({
+      name: `E-Manager (${user.email})`
+    });
+
+    // Save secret to DB (but isTwoFactorEnabled is still false)
+    user.twoFactorSecret = secret;
+    await user.save();
+
+    // Generate QR Code
+    qrcode.toDataURL(secret.otpauth_url, (err, data_url) => {
+      if (err) throw err;
+
+      res.json({
+        message: 'Scan this QR code with Google Authenticator',
+        secret: secret.base32, // Show manual code too
+        qrCode: data_url // The image string
+      });
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error generating 2FA' });
+  }
+};
+
+// --- NEW: Verify & Enable 2FA ---
+// @route   POST /api/user/2fa/enable
+exports.enable2FA = async (req, res) => {
+  const { token } = req.body; // 6-digit code
+
+  try {
+    const user = await User.findById(req.user.id).select('+twoFactorSecret');
+
+    if (!user.twoFactorSecret) {
+      return res.status(400).json({ message: 'No 2FA setup found. Generate a secret first.' });
+    }
+
+    const verified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret.base32,
+      encoding: 'base32',
+      token: token
+    });
+
+    if (verified) {
+      user.isTwoFactorEnabled = true;
+      await user.save();
+      res.json({ message: '2FA is now enabled successfully.' });
+    } else {
+      res.status(400).json({ message: 'Invalid code. Please try again.' });
+    }
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+// --- NEW: Disable 2FA ---
+// @route   POST /api/user/2fa/disable
+exports.disable2FA = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    user.isTwoFactorEnabled = false;
+    user.twoFactorSecret = undefined; // Clear secret
+    await user.save();
+
+    res.json({ message: '2FA has been disabled.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+// @desc    Update Organization Branding
+// @route   PUT /api/user/branding
+exports.updateBranding = async (req, res) => {
+  try {
+    // Only Owners can rebrand
+    if (req.user.role !== 'owner') {
+      return res.status(403).json({ message: 'Only Organization Owners can update branding.' });
+    }
+
+    const { logoUrl, primaryColor } = req.body;
+    const user = await User.findById(req.user.id);
+
+    if (logoUrl !== undefined) user.branding.logoUrl = logoUrl;
+    if (primaryColor !== undefined) user.branding.primaryColor = primaryColor;
+
+    await user.save();
+
+    res.json({
+      message: 'Branding updated successfully',
+      branding: user.branding
+    });
+
+  } catch (error) {
+    console.error('Branding Update Error:', error);
+    res.status(500).json({ message: 'Server Error' });
   }
 };

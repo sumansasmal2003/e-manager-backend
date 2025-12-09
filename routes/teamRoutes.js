@@ -17,12 +17,13 @@ const {
 } = require('../controllers/teamController');
 
 const { protect } = require('../middleware/authMiddleware');
+const { checkTeamLimit, checkMemberLimit } = require('../middleware/subscriptionMiddleware');
 
 // All these routes are protected
 router.use(protect);
 
 router.route('/')
-  .post(createTeam)  // POST /api/teams
+  .post(checkTeamLimit, createTeam)  // POST /api/teams
   .get(getMyTeams);   // GET /api/teams
 
   router.route('/:id')
@@ -33,7 +34,7 @@ router.route('/')
   .delete(deleteTeam);
 
 router.route('/:id/add')
-  .put(addTeamMember); // PUT /api/teams/some-team-id/add
+  .put(checkMemberLimit, addTeamMember); // PUT /api/teams/some-team-id/add
 
   router.route('/:id/remove')
   .put(removeTeamMember);

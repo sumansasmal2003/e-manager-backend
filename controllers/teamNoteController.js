@@ -23,6 +23,9 @@ exports.getTeamNotesForTeam = async (req, res) => {
 // @route   POST /api/teamnotes/:teamId
 exports.createTeamNote = async (req, res) => {
   try {
+    if (req.user.role === 'manager' && !req.user.permissions.canCreateNotes) {
+      return res.status(403).json({ message: 'Restricted: You do not have permission to create team notes.' });
+    }
     const { title, content } = req.body;
     if (!title || !content) {
       return res.status(400).json({ message: 'Please provide a title and content' });
@@ -88,6 +91,10 @@ exports.deleteTeamNote = async (req, res) => {
 
     if (!note) {
       return res.status(404).json({ message: 'Team note not found' });
+    }
+
+    if (req.user.role === 'manager' && !req.user.permissions.canDeleteNotes) {
+      return res.status(403).json({ message: 'Restricted: You do not have permission to delete notes.' });
     }
 
     // Authorization is handled by checkTeamMembership middleware

@@ -1,12 +1,14 @@
-// routes/aiUsageRoutes.js
 const express = require('express');
 const router = express.Router();
-const { getUsageStats } = require('../controllers/aiUsageController');
-const { protect } = require('../middleware/authMiddleware');
+const { getUsageStats, updateAllocation } = require('../controllers/aiUsageController');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
-// @route   GET /api/ai-usage/stats
-// @desc    Get all AI usage statistics for the logged-in user
-// @access  Private
-router.route('/stats').get(protect, getUsageStats);
+router.use(protect);
+
+router.route('/stats')
+  .get(getUsageStats);
+
+router.route('/allocate')
+  .put(authorize('owner'), updateAllocation); // Only Owner
 
 module.exports = router;
