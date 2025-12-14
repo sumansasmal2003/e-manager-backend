@@ -89,6 +89,12 @@ exports.googleLoginCallback = async (req, res) => {
 
     const token = generateToken(user._id);
 
+    let branding = user.branding;
+    if (user.role === 'manager' && user.ownerId) {
+       const owner = await User.findById(user.ownerId).select('branding');
+       if (owner && owner.branding) branding = owner.branding;
+    }
+
     // 2. Prepare Data for Frontend
     const userData = JSON.stringify({
       _id: user._id,
@@ -97,7 +103,7 @@ exports.googleLoginCallback = async (req, res) => {
       role: user.role,
       permissions: user.permissions,
       subscription: user.subscription,
-      branding: user.branding,
+      branding: branding,
       isTwoFactorEnabled: user.isTwoFactorEnabled,
       companyName: user.companyName, // Frontend checks this string
       token: token

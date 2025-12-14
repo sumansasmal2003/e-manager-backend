@@ -5,13 +5,14 @@ const {
   loginUser,
   forgotPassword,
   resetPassword,
-  createManager, // <-- Import this
+  createManager,
+  createEmployee,
   verifyTwoFactorLogin
 } = require('../controllers/authController');
-const { checkManagerLimit } = require('../middleware/subscriptionMiddleware');
+const { checkManagerLimit, checkMemberLimit } = require('../middleware/subscriptionMiddleware'); // <-- Import checkMemberLimit
 const { loginLimiter } = require('../middleware/rateLimitMiddleware');
 
-const { protect, authorize } = require('../middleware/authMiddleware'); // <-- Import middleware
+const { protect, authorize } = require('../middleware/authMiddleware');
 
 // Public Routes
 router.post('/register', registerUser);
@@ -19,13 +20,22 @@ router.post('/login', loginLimiter, loginUser);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
 
-// Protected Routes (Owner Only)
+// Protected Routes
 router.post(
   '/create-manager',
   protect,
   authorize('owner'),
-  checkManagerLimit, // <-- Add check here
+  checkManagerLimit,
   createManager
+);
+
+// New Employee Route with Limit Check
+router.post(
+  '/create-employee',
+  protect,
+  authorize('owner', 'manager'),
+  checkMemberLimit, // <-- Added Limit Check here
+  createEmployee
 );
 
 router.post('/verify-2fa', verifyTwoFactorLogin);

@@ -57,6 +57,12 @@ const teamSchema = new mongoose.Schema(
         trim: true,
       },
     ],
+    employees: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      }
+    ],
     figmaFiles: [figmaFileSchema],
     githubRepos: [githubRepoSchema],
     liveProjects: [liveProjectSchema],

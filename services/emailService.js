@@ -34,6 +34,11 @@ const wrapEmailHTML = (heading, content, callToAction = null) => {
         .info-label { font-weight: 600; color: #64748b; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
         .info-value { color: #0f172a; font-size: 16px; display: block; margin-top: 4px; }
         .highlight { background-color: #f1f5f9; padding: 16px; border-radius: 8px; font-family: monospace; color: #0f172a; font-size: 24px; text-align: center; letter-spacing: 4px; margin: 24px 0; }
+
+        /* Status Badges */
+        .status-badge { display: inline-block; padding: 8px 12px; border-radius: 6px; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; }
+        .suspended { background-color: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .active { background-color: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
       </style>
     </head>
     <body>
@@ -169,6 +174,82 @@ const sendMemberReportEmail = async (toEmail, memberName, pdfBuffer, userId) => 
   }, userId, memberName);
 };
 
+const sendWelcomeEmail = async (email, username, password, companyName, teamName, role, ownerId) => {
+  const subject = `Welcome to ${companyName} - Your New Account`;
+  const loginUrl = process.env.FRONTEND_URL || "https://your-app-url.com/login";
+
+  const htmlContent = `
+    <p>Hello <strong>${username}</strong>,</p>
+    <p>Welcome to <strong>${companyName}</strong>! You have been added to the team <strong>${teamName}</strong> as an ${role}.</p>
+    <p>Here are your temporary login credentials to get started:</p>
+
+    <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 24px 0; border: 1px solid #e2e8f0;">
+      <div class="info-row" style="border-bottom: 1px solid #e2e8f0; margin-bottom: 12px; padding-bottom: 12px;">
+        <span class="info-label" style="display:block; font-size:12px; color:#64748b; font-weight:600; text-transform:uppercase;">Email</span>
+        <span class="info-value" style="display:block; font-size:16px; color:#0f172a; margin-top:4px;">${email}</span>
+      </div>
+      <div class="info-row" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;">
+        <span class="info-label" style="display:block; font-size:12px; color:#64748b; font-weight:600; text-transform:uppercase;">Temporary Password</span>
+        <span class="info-value" style="display:block; font-size:16px; color:#0f172a; margin-top:4px; font-family:monospace; letter-spacing: 1px;">${password}</span>
+      </div>
+    </div>
+
+    <p style="font-size: 14px; color: #64748b;">For security purposes, please change your password immediately after your first login.</p>
+  `;
+
+  const cta = `<a href="${loginUrl}" class="cta-button" style="color: #ffffff;">Log in to Dashboard</a>`;
+  const html = wrapEmailHTML('Welcome to the Team', htmlContent, cta);
+  const text = `Welcome to ${companyName}!\n\nEmail: ${email}\nPassword: ${password}\n\nPlease log in here: ${loginUrl}`;
+
+  await sendEmail({
+    from: `"E-Manager Onboarding" <${process.env.EMAIL_USERNAME}>`,
+    to: email,
+    subject,
+    text,
+    html
+  }, ownerId, username);
+};
+
+/**
+ * 4. NEW: Account Status Email (Suspension/Activation)
+ */
+const sendAccountStatusEmail = async (email, username, companyName, isSuspended) => {
+  const subject = isSuspended ? 'Action Required: Account Suspended' : 'Access Restored: Account Activated';
+  const loginUrl = process.env.FRONTEND_URL || "https://your-app-url.com/login";
+
+  const statusBadge = isSuspended
+    ? '<div class="status-badge suspended">Account Suspended</div>'
+    : '<div class="status-badge active">Account Active</div>';
+
+  const messageBody = isSuspended
+    ? `<p>Your access to the <strong>${companyName}</strong> workspace has been suspended by the organization administrator.</p>
+       <p>You will no longer be able to log in or access your dashboard. If you believe this is an error, please contact your manager immediately.</p>`
+    : `<p>Good news! Your access to the <strong>${companyName}</strong> workspace has been restored.</p>
+       <p>You can now log in and resume your activities.</p>`;
+
+  const htmlContent = `
+    <div style="text-align: center;">${statusBadge}</div>
+    <p>Hello <strong>${username}</strong>,</p>
+    ${messageBody}
+  `;
+
+  const heading = isSuspended ? 'Account Status Update' : 'Welcome Back';
+  const cta = isSuspended ? null : `<a href="${loginUrl}" class="cta-button" style="color: #ffffff;">Log In Now</a>`;
+
+  const html = wrapEmailHTML(heading, htmlContent, cta);
+  const text = isSuspended
+    ? `Hello ${username}, your account for ${companyName} has been suspended. Please contact your admin.`
+    : `Hello ${username}, your account for ${companyName} has been reactivated. Login here: ${loginUrl}`;
+
+  await sendEmail({
+    from: `"E-Manager Security" <${process.env.EMAIL_USERNAME}>`,
+    to: email,
+    subject,
+    text,
+    html
+  }, null, username);
+};
+
 /**
  * 3. Job Application Emails (Sender: Careers)
  */
@@ -272,5 +353,7 @@ module.exports = {
   sendPasswordResetEmail,
   sendMemberReportEmail,
   sendJobApplicationEmails,
-  sendContactEmails
+  sendContactEmails,
+  sendWelcomeEmail,
+  sendAccountStatusEmail
 };

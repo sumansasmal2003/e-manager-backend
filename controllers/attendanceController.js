@@ -31,22 +31,40 @@ const format = (date, formatStr) => {
 exports.getAttendance = async (req, res) => {
   try {
     const { year, month } = req.query;
+    if (!year || !month) return res.status(400).json({ message: 'Year and month required' });
 
-    if (!year || !month) {
-      return res.status(400).json({ message: 'Year and month are required' });
-    }
-
-    const allowedIds = await getAllowedLeaderIds(req.user);
-
-    // Calculate start and end dates for the query
     const startDate = new Date(year, month, 1);
     const endDate = new Date(year, parseInt(month) + 1, 1);
 
-    const records = await Attendance.find({
-      leader: { $in: allowedIds }, // Fetch records for ANY allowed leader
-      date: { $gte: startDate, $lt: endDate },
-    });
+    let query = { date: { $gte: startDate, $lt: endDate } };
 
+    if (req.user.role === 'employee') {
+      // Employee: See ONLY their own records
+      query.member = req.user.username;
+    }
+    else if (req.user.role === 'manager') {
+      // Manager: See records for THEIR members AND THEMSELVES
+      const teams = await Team.find({ owner: req.user._id }).select('members');
+
+      const memberNames = [];
+      teams.forEach(t => {
+        if (t.members && Array.isArray(t.members)) {
+          memberNames.push(...t.members);
+        }
+      });
+
+      // FIX: Add Manager's own name to the list so they see their own rows
+      memberNames.push(req.user.username);
+
+      query.member = { $in: memberNames };
+    }
+    else {
+      // Owner: See records marked by themselves or their managers
+      const allowedIds = await getAllowedLeaderIds(req.user);
+      query.leader = { $in: allowedIds };
+    }
+
+    const records = await Attendance.find(query);
     res.json(records);
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
@@ -55,35 +73,33 @@ exports.getAttendance = async (req, res) => {
 };
 
 // @desc    Set (create or update) an attendance record
-// @route   POST /api/attendance
 exports.setAttendance = async (req, res) => {
   try {
-    const { date, member, status } = req.body;
-
-    if (!date || !member || !status) {
-      return res.status(400).json({ message: 'Date, member, and status are required' });
+    // 1. Employee Restriction
+    if (req.user.role === 'employee') {
+      return res.status(403).json({ message: 'Restricted' });
     }
 
-    // Ensure the date is set to the start of the day in UTC
+    const { date, member, status } = req.body;
+    if (!date || !member || !status) return res.status(400).json({ message: 'Missing fields' });
+
+    // 2. Manager Restriction: Cannot mark own attendance
+    if (req.user.role === 'manager') {
+        if (req.user.permissions.canMarkAttendance === false) {
+             return res.status(403).json({ message: 'Restricted: You do not have permission to mark attendance.' });
+        }
+        if (member === req.user.username) {
+             return res.status(403).json({ message: 'Managers cannot mark their own attendance. Contact the Owner.' });
+        }
+    }
+
     const targetDate = new Date(date);
     targetDate.setUTCHours(0, 0, 0, 0);
 
-    // "Upsert": Find one record and update it, or create it if it doesn't exist.
-    // Note: We save it under req.user.id (the person performing the action).
-    // The 'getAttendance' query uses $in: allowedIds so the Owner will see it regardless.
     const record = await Attendance.findOneAndUpdate(
-      {
-        leader: req.user.id,
-        member: member,
-        date: targetDate,
-      },
-      {
-        status: status,
-      },
-      {
-        new: true, // Return the new/updated document
-        upsert: true, // Create it if it doesn't exist
-      }
+      { leader: req.user.id, member: member, date: targetDate },
+      { status: status },
+      { new: true, upsert: true }
     );
 
     res.status(201).json(record);
@@ -93,35 +109,70 @@ exports.setAttendance = async (req, res) => {
   }
 };
 
-// @desc    Get all unique members for the leader with their profile dates
-// @route   GET /api/attendance/members
+// @desc    Get members for the grid
 exports.getMembers = async (req, res) => {
   try {
-    const allowedIds = await getAllowedLeaderIds(req.user);
+    // 1. Employee View
+    if (req.user.role === 'employee') {
+      const profile = await MemberProfile.findOne({ name: req.user.username });
+      return res.json([{
+        name: req.user.username,
+        joiningDate: profile ? profile.joiningDate : req.user.createdAt,
+        endingDate: profile ? profile.endingDate : null,
+        email: req.user.email,
+        role: 'employee'
+      }]);
+    }
 
-    // 1. Get all unique member names from teams owned by allowed leaders
+    const allowedIds = await getAllowedLeaderIds(req.user);
     const teams = await Team.find({ owner: { $in: allowedIds } }).select('members');
     const memberSet = new Set();
     teams.forEach(team => {
-      team.members.forEach(member => {
-        memberSet.add(member);
-      });
+      team.members.forEach(member => memberSet.add(member));
     });
+
+    const managerList = [];
+
+    // 2. If Owner, Include Managers
+    if (req.user.role === 'owner') {
+        const managers = await User.find({ ownerId: req.user._id, role: 'manager' });
+        managers.forEach(mgr => {
+            if (!memberSet.has(mgr.username)) {
+                managerList.push({
+                    name: mgr.username,
+                    joiningDate: mgr.createdAt,
+                    endingDate: !mgr.isActive ? new Date() : null,
+                    email: mgr.email,
+                    role: 'manager'
+                });
+            }
+        });
+    }
+
+    // 3. FIX: If Manager, Include Self (so they show up in the grid)
+    if (req.user.role === 'manager') {
+         // Ensure manager isn't already in the set (unlikely but safe)
+         if (!memberSet.has(req.user.username)) {
+             managerList.push({
+                 name: req.user.username,
+                 joiningDate: req.user.createdAt,
+                 endingDate: null,
+                 email: req.user.email,
+                 role: 'manager' // Tag as manager so frontend can block self-edit
+             });
+         }
+    }
+
     const uniqueMemberNames = [...memberSet].sort();
 
-    // 2. Fetch all profiles for these members (scoped to allowed leaders)
     const profiles = await MemberProfile.find({
       leader: { $in: allowedIds },
       name: { $in: uniqueMemberNames }
     }).select('name joiningDate endingDate email');
 
-    // 3. Create a map of profiles for easy lookup
     const profileMap = new Map();
-    profiles.forEach(profile => {
-      profileMap.set(profile.name, profile);
-    });
+    profiles.forEach(profile => profileMap.set(profile.name, profile));
 
-    // 4. Combine names with profiles
     const membersWithProfiles = uniqueMemberNames.map(name => {
       const profile = profileMap.get(name);
       return {
@@ -129,10 +180,14 @@ exports.getMembers = async (req, res) => {
         joiningDate: profile ? profile.joiningDate : null,
         endingDate: profile ? profile.endingDate : null,
         email: profile ? profile.email : '',
+        role: 'member'
       };
     });
 
-    res.json(membersWithProfiles);
+    // Combine Members + Managers (and Self)
+    const finalResult = [...membersWithProfiles, ...managerList].sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json(finalResult);
   } catch (error) {
     console.error('Error in getMembers:', error.message);
     res.status(500).json({ message: 'Server Error' });
@@ -145,75 +200,50 @@ exports.getMembers = async (req, res) => {
 exports.getAttendanceSummary = async (req, res) => {
   try {
     const { year, month } = req.query;
-    if (!year || !month) {
-      return res.status(400).json({ message: 'Year and month are required' });
+    if (!year || !month) return res.status(400).json({ message: 'Required fields missing' });
+
+    let matchQuery = {
+      date: {
+        $gte: new Date(Date.UTC(year, month, 1)),
+        $lt: new Date(Date.UTC(year, parseInt(month) + 1, 1))
+      }
+    };
+
+    if (req.user.role === 'employee') {
+      matchQuery.member = req.user.username;
+    } else {
+      const allowedIds = await getAllowedLeaderIds(req.user);
+      const objectIds = allowedIds.map(id => new mongoose.Types.ObjectId(id));
+      matchQuery.leader = { $in: objectIds };
     }
 
-    const allowedIds = await getAllowedLeaderIds(req.user);
-    // Convert IDs to ObjectIds for aggregation pipeline
-    const objectIds = allowedIds.map(id => new mongoose.Types.ObjectId(id));
-
-    const startDate = new Date(Date.UTC(year, month, 1));
-    const endDate = new Date(Date.UTC(year, parseInt(month) + 1, 1));
-
-    // Use an aggregation pipeline to group by date and count statuses
     const summary = await Attendance.aggregate([
-      {
-        $match: {
-          leader: { $in: objectIds },
-          date: { $gte: startDate, $lt: endDate },
-        },
-      },
-      {
-        $group: {
-          _id: '$date', // Group by the date
-          statuses: {
-            $push: '$status', // Push each status into an array
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 0, // Don't include the _id field
-          date: '$_id',
-          statuses: 1, // Include the statuses array
-        },
-      },
+      { $match: matchQuery },
+      { $group: { _id: '$date', statuses: { $push: '$status' } } },
+      { $project: { _id: 0, date: '$_id', statuses: 1 } },
     ]);
-
     res.json(summary);
   } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
-    logError(req.user.id, error, req.originalUrl);
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
-// @desc    Get attendance records for a specific date
-// @route   GET /api/attendance/date?date=2025-11-12
 exports.getAttendanceForDate = async (req, res) => {
-  try {
-    const { date } = req.query;
+    try {
+        const { date } = req.query;
+        if (!date) return res.status(400).json({ message: 'Date required' });
+        const targetDate = new Date(date); targetDate.setUTCHours(0,0,0,0);
 
-    if (!date) {
-      return res.status(400).json({ message: 'Date is required' });
-    }
-
-    const allowedIds = await getAllowedLeaderIds(req.user);
-
-    // Create a date object from the query string
-    const targetDate = new Date(date);
-    targetDate.setUTCHours(0, 0, 0, 0);
-
-    const records = await Attendance.find({
-      leader: { $in: allowedIds },
-      date: targetDate,
-    });
-
-    res.json(records);
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error', error: error.message });
-    logError(req.user.id, error, req.originalUrl);
-  }
+        let query = { date: targetDate };
+        if (req.user.role === 'employee') {
+            query.member = req.user.username;
+        } else {
+            const allowedIds = await getAllowedLeaderIds(req.user);
+            query.leader = { $in: allowedIds };
+        }
+        const records = await Attendance.find(query);
+        res.json(records);
+    } catch(e) { res.status(500).json({message: 'Error'}); }
 };
 
 // @desc    Export attendance records based on filters
@@ -340,60 +370,37 @@ exports.exportAttendanceData = async (req, res) => {
 // @desc    Set a specific date as 'Holiday' for all members
 // @route   POST /api/attendance/bulk-holiday
 exports.setBulkHoliday = async (req, res) => {
-  const { date } = req.body;
-
-  if (!date) {
-    return res.status(400).json({ message: 'Date is required' });
-  }
-
   try {
-    const allowedIds = await getAllowedLeaderIds(req.user);
+    if (req.user.role === 'employee') return res.status(403).json({ message: 'Restricted' });
 
-    // 1. Find all members in scope
-    const teams = await Team.find({ owner: { $in: allowedIds } }).select('members');
-    const memberSet = new Set();
-    teams.forEach(team => {
-      team.members.forEach(member => {
-        memberSet.add(member);
-      });
-    });
-    const uniqueMemberNames = [...memberSet];
-
-    if (uniqueMemberNames.length === 0) {
-      return res.status(200).json({ message: 'No members to update' });
+    // NEW: Manager Check
+    if (req.user.role === 'manager' && req.user.permissions.canMarkAttendance === false) {
+      return res.status(403).json({ message: 'Restricted: You do not have permission to mark attendance.' });
     }
 
-    // 2. Create the target date (start of day UTC)
+    const { date } = req.body;
+    if (!date) return res.status(400).json({ message: 'Date required' });
+
+    const allowedIds = await getAllowedLeaderIds(req.user);
+    const teams = await Team.find({ owner: { $in: allowedIds } }).select('members');
+    const memberSet = new Set();
+    teams.forEach(team => { team.members.forEach(member => { memberSet.add(member); }); });
+    const uniqueMemberNames = [...memberSet];
+
+    if (uniqueMemberNames.length === 0) return res.status(200).json({ message: 'No members' });
+
     const targetDate = new Date(date);
     targetDate.setUTCHours(0, 0, 0, 0);
 
-    // 3. Create an array of "upsert" operations
     const operations = uniqueMemberNames.map(memberName => ({
       updateOne: {
-        filter: {
-          leader: req.user.id, // Log holiday under the current user
-          member: memberName,
-          date: targetDate,
-        },
-        update: {
-          $set: { status: 'Holiday' },
-        },
+        filter: { leader: req.user.id, member: memberName, date: targetDate },
+        update: { $set: { status: 'Holiday' } },
         upsert: true,
       },
     }));
 
-    // 4. Execute all operations
-    const result = await Attendance.bulkWrite(operations);
-
-    res.json({
-      message: 'Holiday set for all members',
-      matched: result.matchedCount,
-      modified: result.modifiedCount,
-      upserted: result.upsertedCount,
-    });
-  } catch (error) {
-    console.error('Bulk Holiday Set Error:', error.message);
-    res.status(500).json({ message: 'Server Error', error: error.message });
-    logError(req.user.id, error, req.originalUrl);
-  }
+    await Attendance.bulkWrite(operations);
+    res.json({ message: 'Holiday set' });
+  } catch(e) { res.status(500).json({message:'Error'}); }
 };

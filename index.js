@@ -89,6 +89,7 @@ app.use('/api/emails', emailRoutes);
 app.use('/api/insights', insightRoutes);
 app.use('/api/careers', require('./routes/careerRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
+app.use('/api/announcements', require('./routes/announcementRoutes'));
 
 const PORT = process.env.PORT || 5000;
 

@@ -1,8 +1,13 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Task = require('../models/Task');
+const dotenv = require('dotenv');
+
+dotenv.config();
+
+const api = process.env.GEMINI_API_KEY;
 
 // Initialize the AI client
-const genAI = new GoogleGenerativeAI('AIzaSyDxz4v-T1_GCUxgxYMSSKDm1nkKzIGJdNU');
+const genAI = new GoogleGenerativeAI(api);
 
 /**
  * Generates a professional, member-wise report using Gemini AI.
@@ -14,7 +19,7 @@ const genAI = new GoogleGenerativeAI('AIzaSyDxz4v-T1_GCUxgxYMSSKDm1nkKzIGJdNU');
  * @returns {string} The AI-generated report text in Markdown format.
  */
 exports.generateAIReport = async (leaderName, team, startDate, endDate, rawData) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); // Using 'pro' for a more detailed report
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' }); // Using 'pro' for a more detailed report
 
   // --- Convert member-wise data into a detailed text block ---
   let memberDataSummary = '';
@@ -114,7 +119,7 @@ Begin Report:
  * @returns {string} The AI-generated briefing text in Markdown format.
  */
 exports.generateAIDailyBriefing = async (username, actionItems) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); // Use 'pro' for this task
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' }); // Use 'pro' for this task
 
   // 1. Serialize the data into a simple text format for the AI
   let dataSummary = '--- DATA START ---\n';
@@ -206,7 +211,7 @@ ${dataSummary}
  * @returns {string} The AI-generated report text in Markdown format.
  */
 exports.generateAIMemberReport = async (profile, tasks, attendance, startDate, endDate) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   // --- 1. Calculate Statistics ---
 
@@ -320,7 +325,7 @@ Begin Report (output in simple Markdown, starting with the '# Performance Report
  * @returns {string} The AI-generated talking points in a simple string format.
  */
 exports.generateAITalkingPoints = async (profile, tasks, activities) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   // --- 1. Calculate Statistics & Filter Data ---
   const today = new Date();
@@ -391,7 +396,7 @@ Begin Talking Points:
  * @returns {Promise<Array<{title: string, description: string}>>} A promise that resolves to an array of sub-task objects.
  */
 exports.generateAISubtasks = async (taskTitle) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   // 1. The Prompt (remains the same)
   const prompt = `
@@ -447,7 +452,7 @@ Each object in the array must have two keys: "title" (string) and "description" 
  * This is *only* called if the intent is "GET_ANSWER".
  */
 exports.generateChatResponse = async (history, question, context) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   // 1. --- MODIFIED SYSTEM INSTRUCTION ---
   // This prompt is now *simpler*. It no longer needs rules for
@@ -507,7 +512,7 @@ ${context}
  * It returns a JSON object describing the user's intent.
  */
 exports.determineUserIntent = async (question, context, history, timezone) => { // <-- 1. ADD TIMEZONE
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   // Convert chat history to a simple string
   const historyString = history.map(h => `${h.role}: ${h.content}`).join('\n');
@@ -653,7 +658,7 @@ Respond ONLY with the single, valid JSON object for the action.
  * @returns {Promise<{subject: string, body: string}>} - A JSON object with subject and HTML body.
  */
 exports.generateEmailDraft = async (userPrompt, dataContext, senderName) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   const prompt = `
 You are an expert HR manager and team leader. Your task is to draft a professional, clear, and context-aware email.
@@ -702,7 +707,7 @@ Draft the email now.
  * @returns {Promise<string>} - A JSON string *array* of insight objects.
  */
 exports.generateProactiveInsights = async (dataContext) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   const prompt = `
 You are a proactive, senior-level "Manager's Assistant" AI.
@@ -768,7 +773,7 @@ Analyze the data and return the JSON array of insights now.
  * @returns {Promise<object>} - A JSON object with the estimate.
  */
 exports.generateTaskEstimate = async (taskTitle, teamId, timezone) => {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
   // 1. Fetch all *completed* tasks for this team to build a knowledge base.
   const completedTasks = await Task.find({

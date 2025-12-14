@@ -10,8 +10,24 @@ const EmailLog = require('../models/EmailLog');
 const MemberProfile = require('../models/MemberProfile');
 const OneOnOne = require('../models/OneOnOne');
 const { logError } = require('../services/logService');
+const { sendAccountStatusEmail } = require('../services/emailService');
 const speakeasy = require('speakeasy');
 const qrcode = require('qrcode');
+
+const getInheritedBranding = async (user) => {
+  let branding = user.branding;
+  let companyName = user.companyName;
+
+  // If user is Manager or Employee, fetch Owner's branding
+  if (['manager', 'employee'].includes(user.role) && user.ownerId) {
+    const owner = await User.findById(user.ownerId).select('branding companyName');
+    if (owner) {
+      if (owner.branding) branding = owner.branding;
+      if (!companyName && owner.companyName) companyName = owner.companyName;
+    }
+  }
+  return { branding, companyName };
+};
 
 // @desc    Get logged-in user's profile
 // @route   GET /api/user/profile
@@ -19,6 +35,7 @@ exports.getUserProfile = async (req, res) => {
   const user = await User.findById(req.user.id);
 
   if (user) {
+    const { branding, companyName } = await getInheritedBranding(user);
     res.json({
       _id: user._id,
       username: user.username,
@@ -27,11 +44,11 @@ exports.getUserProfile = async (req, res) => {
       ownerId: user.ownerId,
       permissions: user.permissions,
       subscription: user.subscription,
-      branding: user.branding,
+      branding: branding,
       isTwoFactorEnabled: user.isTwoFactorEnabled,
       connecteamAccounts: user.connecteamAccounts, // <-- Must be this
       googleCalendarConnected: user.googleCalendarConnected, // <-- Must be included
-      companyName: user.companyName,
+      companyName: companyName,
       companyAddress: user.companyAddress,
       companyWebsite: user.companyWebsite,
       ceoName: user.ceoName,
@@ -181,14 +198,17 @@ exports.updateUserProfile = async (req, res) => {
 
     const updatedUser = await user.save();
 
+    const { branding, companyName: resolvedCompanyName } = await getInheritedBranding(updatedUser);
+
     // 3. Send back all fields that the AuthContext uses
     res.json({
       _id: updatedUser._id,
       username: updatedUser.username,
       email: updatedUser.email,
+      branding: branding,
       connecteamAccounts: updatedUser.connecteamAccounts,
       googleCalendarConnected: updatedUser.googleCalendarConnected,
-      companyName: updatedUser.companyName,
+      companyName: resolvedCompanyName,
       companyAddress: updatedUser.companyAddress,
       companyWebsite: updatedUser.companyWebsite,
       ceoName: updatedUser.ceoName,
@@ -356,32 +376,35 @@ exports.deleteUserAccount = async (req, res) => {
 // @route   PUT /api/user/managers/:id/permissions
 exports.updateManagerPermissions = async (req, res) => {
   try {
-    const managerId = req.params.id;
-    const { permissions } = req.body; // Expects object { canDeleteTasks: true, ... }
+    const targetUserId = req.params.id;
+    const { permissions } = req.body;
 
     if (req.user.role !== 'owner') {
       return res.status(403).json({ message: 'Only Owners can manage permissions.' });
     }
 
-    // Find the manager and ensure they belong to this owner
-    const manager = await User.findOne({ _id: managerId, ownerId: req.user.id });
+    // Find the user (Manager or Employee) that belongs to this owner
+    // We check ownerId OR if they are an employee in a team owned by this owner hierarchy
+    // Simple check: ownerId matches req.user.id (Direct Report) OR ...
+    // Actually, for employees created by managers, ownerId might be the Manager's ID?
+    // Wait, in authController: rootOwnerId = owner._id. So all employees link to Root Owner.
 
-    if (!manager) {
-      return res.status(404).json({ message: 'Manager not found.' });
+    const targetUser = await User.findOne({ _id: targetUserId, ownerId: req.user.id });
+
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found or not in your organization.' });
     }
 
-    // Update permissions
-    // We merge existing permissions with new ones to avoid overwriting missing keys
-    manager.permissions = {
-      ...manager.permissions,
+    targetUser.permissions = {
+      ...targetUser.permissions,
       ...permissions
     };
 
-    await manager.save();
+    await targetUser.save();
 
     res.json({
       message: 'Permissions updated successfully',
-      permissions: manager.permissions
+      permissions: targetUser.permissions
     });
 
   } catch (error) {
@@ -406,9 +429,21 @@ exports.toggleManagerStatus = async (req, res) => {
       return res.status(404).json({ message: 'Manager not found.' });
     }
 
-    // Toggle status
     manager.isActive = !manager.isActive;
     await manager.save();
+
+    // --- SEND EMAIL ---
+    try {
+      const isSuspended = !manager.isActive;
+      await sendAccountStatusEmail(
+        manager.email,
+        manager.username,
+        req.user.companyName,
+        isSuspended
+      );
+    } catch (emailErr) {
+      console.error("Failed to send suspension email:", emailErr.message);
+    }
 
     const statusMsg = manager.isActive ? 'activated' : 'suspended';
 
@@ -590,11 +625,15 @@ exports.updateBranding = async (req, res) => {
       return res.status(403).json({ message: 'Only Organization Owners can update branding.' });
     }
 
-    const { logoUrl, primaryColor } = req.body;
+    // 1. Destructure savedColors as well
+    const { logoUrl, primaryColor, savedColors } = req.body;
     const user = await User.findById(req.user.id);
 
     if (logoUrl !== undefined) user.branding.logoUrl = logoUrl;
     if (primaryColor !== undefined) user.branding.primaryColor = primaryColor;
+
+    // 2. Save the custom colors list if provided
+    if (savedColors !== undefined) user.branding.savedColors = savedColors;
 
     await user.save();
 

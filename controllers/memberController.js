@@ -8,7 +8,7 @@ const Attendance = require('../models/Attendance');
 const User = require('../models/User'); // <-- Needed for Owner logic
 const { generatePDFFromMarkdown } = require('../services/memberReportService');
 const { generateAITalkingPoints, generateAIMemberReport } = require('../services/reportService');
-const { sendMemberReportEmail } = require('../services/emailService');
+const { sendMemberReportEmail, sendAccountStatusEmail } = require('../services/emailService');
 const { logAiAction } = require('../services/aiLogService');
 const { logError } = require('../services/logService');
 
@@ -27,11 +27,24 @@ const getAllowedLeaderIds = async (user) => {
 // @route   GET /api/members
 exports.getAllMembers = async (req, res) => {
   try {
-    const allowedIds = await getAllowedLeaderIds(req.user);
+    let teams;
 
-    // Fetch teams owned by any allowed leader
-    const teams = await Team.find({ owner: { $in: allowedIds } }).select('members teamName');
+    // 1. Fetch Teams based on Role
+    if (req.user.role === 'employee') {
+      // Employees see members of teams they belong to
+      teams = await Team.find({
+        $or: [
+          { employees: req.user._id },
+          { members: req.user.username }
+        ]
+      }).select('members teamName');
+    } else {
+      // Owners/Managers see members of teams they manage
+      const allowedIds = await getAllowedLeaderIds(req.user);
+      teams = await Team.find({ owner: { $in: allowedIds } }).select('members teamName');
+    }
 
+    // 2. Map Members to Teams
     const memberMap = new Map();
 
     teams.forEach(team => {
@@ -48,13 +61,84 @@ exports.getAllMembers = async (req, res) => {
       teams
     }));
 
-    const sortedMembers = uniqueMembers.sort((a, b) => a.name.localeCompare(b.name));
+    // 3. Fetch User accounts for these members
+    const memberNames = uniqueMembers.map(m => m.name);
+    const users = await User.find({ username: { $in: memberNames } })
+      .select('_id username role permissions isActive email');
+
+    const userMap = new Map();
+    users.forEach(u => userMap.set(u.username, u));
+
+    // 4. Merge Data
+    const mergedMembers = uniqueMembers.map(member => {
+      const userAccount = userMap.get(member.name);
+      return {
+        ...member,
+        userId: userAccount ? userAccount._id : null,
+        role: userAccount ? userAccount.role : 'ghost',
+        permissions: userAccount ? userAccount.permissions : null,
+        isActive: userAccount ? userAccount.isActive : null,
+        email: userAccount ? userAccount.email : null
+      };
+    });
+
+    // 5. Filter out the requesting user from the list (Optional: Keeps list clean)
+    // const finalMembers = mergedMembers.filter(m => m.name !== req.user.username);
+
+    const sortedMembers = mergedMembers.sort((a, b) => a.name.localeCompare(b.name));
 
     res.json(sortedMembers);
   } catch (error) {
     console.error('Error in getAllMembers:', error.message);
     logError(req.user.id, error, req.originalUrl);
     res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+// --- NEW: Toggle Employee Status ---
+// @route   PUT /api/members/:id/suspend
+exports.toggleEmployeeStatus = async (req, res) => {
+  try {
+    const targetUserId = req.params.id;
+
+    if (req.user.role !== 'owner') {
+      return res.status(403).json({ message: 'Only Owners can suspend employees.' });
+    }
+
+    const employee = await User.findOne({ _id: targetUserId, ownerId: req.user.id });
+
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee account not found.' });
+    }
+
+    employee.isActive = !employee.isActive;
+    await employee.save();
+
+    // --- SEND EMAIL ---
+    try {
+      // If isActive is FALSE, it means they are NOW SUSPENDED (isSuspended = true)
+      // If isActive is TRUE, it means they are NOW ACTIVE (isSuspended = false)
+      const isSuspended = !employee.isActive;
+
+      await sendAccountStatusEmail(
+        employee.email,
+        employee.username,
+        req.user.companyName,
+        isSuspended
+      );
+    } catch (emailErr) {
+      console.error("Failed to send suspension email:", emailErr.message);
+    }
+
+    const statusMsg = employee.isActive ? 'activated' : 'suspended';
+    res.json({
+      message: `Employee ${employee.username} has been ${statusMsg}.`,
+      isActive: employee.isActive
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+    logError(req.user.id, error, req.originalUrl);
   }
 };
 

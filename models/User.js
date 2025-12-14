@@ -32,7 +32,7 @@ const userSchema = new mongoose.Schema({
   // --- HIERARCHY FIELDS ---
   role: {
     type: String,
-    enum: ['owner', 'manager'],
+    enum: ['owner', 'manager', 'employee'],
     default: 'owner', // Default to owner for new signups
     required: true
   },
@@ -96,6 +96,19 @@ const userSchema = new mongoose.Schema({
 
     canCreateResources: { type: Boolean, default: true },
     canDeleteResources: { type: Boolean, default: true },
+    canHireEmployees: { type: Boolean, default: false },
+    canRemoveMembers: { type: Boolean, default: false },
+
+    canUseAI: { type: Boolean, default: true },
+
+    canViewCalendar: { type: Boolean, default: true },
+    canAccessGameSpace: { type: Boolean, default: true },
+    canViewNotifications: { type: Boolean, default: true },
+    canViewSystemLog: { type: Boolean, default: false },
+
+    canMarkAttendance: { type: Boolean, default: false },
+
+    canEditTasks: { type: Boolean, default: true }
   },
 
   connecteamAccounts: [connecteamAccountSchema],
@@ -114,7 +127,8 @@ const userSchema = new mongoose.Schema({
   },
   branding: {
     logoUrl: { type: String, default: '' }, // URL from Cloudinary/S3
-    primaryColor: { type: String, default: '#111827' } // Default Zinc-900
+    primaryColor: { type: String, default: '#111827' }, // Default Zinc-900
+    savedColors: { type: [String], default: [] }
   },
 }, {
   timestamps: true,

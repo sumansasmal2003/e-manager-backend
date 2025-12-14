@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const Team = require('../models/Team');
 const jwt = require('jsonwebtoken');
-const { sendPasswordResetEmail, sendEmail } = require('../services/emailService');
+const { sendPasswordResetEmail, sendEmail, sendWelcomeEmail } = require('../services/emailService');
 const { logError } = require('../services/logService');
 const speakeasy = require('speakeasy');
 
@@ -154,28 +154,34 @@ exports.loginUser = async (req, res) => {
       return res.status(400).json({ message: 'Please provide email and password' });
     }
 
-    // Select password AND 2FA fields
     const user = await User.findOne({ email }).select('+password +googleCalendarConnected +isTwoFactorEnabled +isActive');
 
     if (user && (await user.matchPassword(password))) {
 
-      // Check if suspended
       if (user.isActive === false) {
         return res.status(403).json({ message: 'Your account is suspended. Contact your administrator.' });
       }
 
-      // --- NEW: 2FA Check ---
       if (user.isTwoFactorEnabled) {
-        // DO NOT send token yet. Tell frontend to prompt for code.
         return res.json({
           twoFactorRequired: true,
           userId: user._id,
           message: 'Please enter your 2FA code'
         });
       }
-      // ----------------------
 
-      // Normal Login (No 2FA)
+      // --- FIX: Resolve Branding Logic ---
+      let branding = user.branding;
+      let companyName = user.companyName;
+      if ((user.role === 'manager' || user.role === 'employee') && user.ownerId) {
+        const owner = await User.findById(user.ownerId).select('branding companyName');
+        if (owner) {
+          if (owner.branding) branding = owner.branding;
+          if (!companyName && owner.companyName) companyName = owner.companyName;
+        }
+      }
+      // -----------------------------------
+
       res.json({
         _id: user._id,
         username: user.username,
@@ -184,12 +190,14 @@ exports.loginUser = async (req, res) => {
         ownerId: user.ownerId,
         permissions: user.permissions,
         subscription: user.subscription,
-        branding: user.branding,
+
+        branding: branding, // <-- Send the resolved branding (Owner's or Self)
+
         isTwoFactorEnabled: user.isTwoFactorEnabled,
         token: generateToken(user._id),
         connecteamAccounts: user.connecteamAccounts,
         googleCalendarConnected: user.googleCalendarConnected,
-        companyName: user.companyName,
+        companyName: companyName,
         createdAt: user.createdAt
       });
     } else {
@@ -197,7 +205,6 @@ exports.loginUser = async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
-    logError(null, error, req.originalUrl);
   }
 };
 
@@ -221,6 +228,16 @@ exports.verifyTwoFactorLogin = async (req, res) => {
       window: 1 // Allow 30sec drift
     });
 
+    let branding = user.branding;
+    let companyName = user.companyName;
+    if ((user.role === 'manager' || user.role === 'employee') && user.ownerId) {
+      const owner = await User.findById(user.ownerId).select('branding companyName');
+      if (owner) {
+        if (owner.branding) branding = owner.branding;
+        if (!companyName && owner.companyName) companyName = owner.companyName;
+      }
+    }
+
     if (verified) {
       // 2FA Success! Send the actual login data
       res.json({
@@ -231,12 +248,12 @@ exports.verifyTwoFactorLogin = async (req, res) => {
         ownerId: user.ownerId,
         permissions: user.permissions,
         subscription: user.subscription,
-        branding: user.branding,
+        branding: branding,
         isTwoFactorEnabled: true,
         token: generateToken(user._id), // The real JWT
         connecteamAccounts: user.connecteamAccounts,
         googleCalendarConnected: user.googleCalendarConnected,
-        companyName: user.companyName,
+        companyName: companyName,
         createdAt: user.createdAt
       });
     } else {
@@ -306,5 +323,82 @@ exports.resetPassword = async (req, res) => {
     console.error('Reset Password Error:', error.message);
     res.status(500).json({ message: 'Server error' });
     logError(null, error, req.originalUrl);
+  }
+};
+
+// @desc    Create an Employee Account (Owner/Manager)
+// @route   POST /api/auth/create-employee
+exports.createEmployee = async (req, res) => {
+  try {
+    if (!['owner', 'manager'].includes(req.user.role)) return res.status(403).json({ message: 'Not authorized.' });
+    if (req.user.role === 'manager' && req.user.permissions.canHireEmployees === false) {
+      return res.status(403).json({ message: 'Access Denied: Hiring disabled.' });
+    }
+
+    const { username, email, password, teamId, canUseAI } = req.body;
+    const rootOwnerId = req.user.role === 'owner' ? req.user._id : req.user.ownerId;
+    const companyName = req.user.companyName || '';
+
+    const team = await Team.findById(teamId);
+    if (!team) return res.status(404).json({ message: 'Team not found.' });
+
+    const userExists = await User.findOne({ email });
+    if (userExists) return res.status(400).json({ message: 'User exists' });
+
+    // Define Initial Permissions
+    const employeePermissions = {
+        canCreateTasks: true,
+        canCreateMeetings: false,
+        canCreateNotes: true,
+        canDeleteTasks: false,
+        canDeleteMeetings: false,
+        canDeleteNotes: false,
+        canExportReports: false,
+        canCreateResources: false,
+        canDeleteResources: false,
+        canHireEmployees: false,
+        canUseAI: canUseAI !== undefined ? canUseAI : true,
+        // --- NEW DEFAULTS ---
+        canViewCalendar: true,
+        canAccessGameSpace: true,
+        canViewNotifications: true
+    };
+
+    const employee = await User.create({
+      username, email, password,
+      role: 'employee',
+      ownerId: rootOwnerId,
+      companyName: companyName,
+      permissions: employeePermissions
+    });
+
+    if (employee) {
+      if (!team.employees) team.employees = [];
+      team.employees.push(employee._id);
+
+      if (!team.members) team.members = [];
+      if (!team.members.includes(username)) {
+        team.members.push(username);
+      }
+
+      await team.save();
+
+      try {
+        await sendWelcomeEmail(email, username, password, companyName, team.teamName, 'Employee', req.user.id);
+      } catch (emailErr) {
+        console.error("Failed to send employee email:", emailErr.message);
+      }
+
+      res.status(201).json({
+        _id: employee._id, username: employee.username, email: employee.email, role: employee.role,
+        message: `Employee created and assigned to ${team.teamName}.`
+      });
+    } else {
+      res.status(400).json({ message: 'Invalid data' });
+    }
+  } catch (error) {
+    console.error("Create Employee Error:", error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+    logError(req.user.id, error, req.originalUrl);
   }
 };

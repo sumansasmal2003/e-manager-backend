@@ -6,7 +6,8 @@ const {
   updateMemberProfile,
   sendMemberReport,
   generateTalkingPoints,
-  deleteMember
+  deleteMember,
+  toggleEmployeeStatus
 } = require('../controllers/memberController');
 const { protect } = require('../middleware/authMiddleware');
 const { checkMemberLimit } = require('../middleware/subscriptionMiddleware');
@@ -31,5 +32,8 @@ router.route('/talking-points')
 
 router.route('/:name')
   .delete(deleteMember);
+
+router.route('/:id/suspend')
+  .put(toggleEmployeeStatus);
 
 module.exports = router;
